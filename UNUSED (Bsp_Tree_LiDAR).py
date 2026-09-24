@@ -31,10 +31,6 @@ segment_vec = p0 + u * dist_vec
 robot_pos = np.array([robot_pos_x, robot_pos_y]) #robot
 
 
-
-
-
-
 class Tree:
     
     def choose_splitter(self, p0, p1, segment_vec, normal_vec):
