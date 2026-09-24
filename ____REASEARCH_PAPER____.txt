@@ -1,1 +1,113 @@
-This is where the LaTeX code for the research paper will go.
+This is where the LaTeX code for the research paper.
+
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{geometry}
+\geometry{margin=1in}
+
+\title{\textbf{Investigating the Navigational Accuracy of Energy-Efficient PPO and how computationally efficient AI improves compute scalability.}}
+
+\author{\textbf{Contributors:} Louis Robison \qquad Yile Xu \qquad Khan Doman}
+
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+% Abstract (DO LAST)
+\end{abstract}
+
+\section{Introduction}
+Deep Reinforcement Learning (DRL) models, specifically Proximal Policy Optimization (PPO), excel at AI navigation tasks that can not be adequately modeled with the input-expected-output training structure. However, these models require significant time and space for training and inference. Specifically, if an input method scales at $O(|E| + |V| \log |V|)$ proportional to weight-matrix dimensions $O(L \times M)$ or worse, the computational time and memory footprint scale accordingly. As a result, implementations would be slower and less efficient, even for small models. By specifically implementing energy cost into the training of a Model, this paper looks into if energy-aware models are still effective compared to high-precision algorithms like A*. This will both track the trajectory of AI compute and help us do significantly more with less. This includes maximising the efficiency of training multiple AIs and significantly reducing the required compute space for these models. The application of key algorithms such as A*, Dijkstra's, and Rapidly-Exploring Random Trees (RRT) to many types of robots, from industrial AGVs and self-driving automobiles to domestic cleaning equipment, is the main focus of incorporating efficiency due to their way of implementation. This is delved into more deeply in Section 1.2.
+
+\subsection{Background Information on Robot Navigation}
+Robot navigation is a crucial component of autonomous systems that enables them to perceive their environment, learn its structure, and map pathways to specific goals or targets in a timely and efficient manner. The procedures and technologies that allow robots to navigate and sometimes interact with their surroundings completely independently are known as robot navigation. It encompasses a robot’s capability to verify its location, orientation, and trajectory. This paper solely focuses on the fastest route from Point A to Point B, or the path planning aspect, using the shortest time and space complexity footprint, or within a set limit (ResearchGate 2019).
+
+\subsection{Challenge of Energy Conservation in Robot Navigation}
+Highly specialized algorithms are completely oblivious to computational bottlenecks and are implemented relative to Absolute, fastest-path navigation.
+
+\begin{figure}[htbp]
+    \centering
+    % \includegraphics[width=0.7\linewidth]{fig1.png}
+    \caption{A* shortest path with path compressed down to only one line.}
+    \label{fig:fig1}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    % \includegraphics[width=0.7\linewidth]{fig2.png}
+    \caption{A* shortest path with slightly more complex destination and destination nodes}
+    \label{fig:fig2}
+\end{figure}
+
+A simple maze example was run using the A* algorithm and compressed using the Line-of-Sight (LOS)\footnote{LOS (Line-of-Sight) pruning is an algorithm that collapses rasterised grid steps into continuous line vectors.}. The nodes (or points) along the robot's path (see Fig. 1 and Fig. 2) represent the different sequential control outputs processed by the FFN (Feed-Forward Network). In traditional A*, computational complexity is bound by graph-search geometry; switching to a RL/PPO driven arcetecture would require passing a new state to receive the next policy-state-action inference or waypoint vectors after every single previous action. By varying robot navigation parameters such as source, destination, and maze size, LiDAR calculations would create huge bottlenecks for slightly more complex mazes, drastically increasing the scaling compute footprint.
+
+Overall, traditional A* algorithms have more precision than a node-minimising A* algorithm along the path, as more nodes mean more controlled, small turns, fully minimising distance\footnote{These algorithms were used to simulate a fully trained AI, but they work completely differently, as a normal A* is actually still the most compute energy efficient.}. Companies implementing AI technology are unlocking groundbreaking research and efficiency, and modern cutting-edge research in Medicine and engineering requires extraordinary precision to function properly.
+
+\subsection{Related work}
+A* and Dijkstra’s algorithm are pathfinding algorithms that guarantee the shortest path or deterministic trajectories in some grid given a start and end node. Rasterized steps that are generated by such algorithms require frequent node re-evaluations and Line-of-sight (LOS) pruning to be efficient. Recalculating LiDAR inputs slows down sequential training when environment parameters are scaled. Achiam, J., Held, D., Tamar, A. and Abbeel, P. (n.d.) - Constrained Policy Optimization (CPO) is a benchmark study and method for safe and efficient RL. Lagrangian PPO is a method of constrained RL that doesn’t produce excessive computation like CPO for small models, adding it to the reward for every episode. Stooke et al. (2020) – Responsive Safety in Reinforcement Learning by PID Lagrangian Methods is a sequel improvement to traditional Lagrangian PPO that adds PID enhancement (derivative and proportional control terms using derivatives of the constraint function), which provides predictive measures to stabilize training dynamics and fixes the overshoot, slow responses, and oscillations during training of Lagrangian PPO.
+
+\section{Research Objectives}
+We suggest a structure for efficient RL and PPO, examine the architecture of these models, and compare them to high-precision AI in real-world applications. Our research will focus on:
+\begin{itemize}
+    \item How these compute-space-aware models compare to normal PPO in maze-solving accuracy, path length, and LiDAR usage using DTW and regression analysis
+    \item How these models scale compute and scale down space complexity.
+    \item The feasibility of implementation to maximise the number of continuous AIs that can be trained.
+    \item How real-world power-minimising agents can reduce greenhouse gas emissions in AI data centres.
+\end{itemize}
+
+By proving the application of a feasible structure for compute-space-efficient AI, we aim to maximize computational throughput and utilization efficiency from similar computational power. This paper aims to provide insights into reducing training latency, lowering computational expenditure, and improving horizontal scalability for multi-agent systems. The efficiency of batched AI, which includes training multiple agents in the same environment in parallel, relies heavily on compute-space efficiency (Content Learning, H.A. and Harvard Research, 2025). This paper chooses to analyse the overall output and throughput performance of efficient AI batching in this Paper.
+
+\subsection{Previous Approaches to Compute-Space Efficient AI \& Objectives for Compute-Space Efficiency Implementation}
+A case study on Constrained Policy Optimisation (Content Learning, H.A. and Harvard Research, 2025) shows that traditional RL maximises cumulative rewards but doesn’t account for operational bounds/constraints per action. Factors such as Maximum allowed turning angle $dir_{/max}$, capping linear step velocity $v_{\max}$, or jerk limits to prevent sudden changes in acceleration and sudden, violent movements were implemented via safe Constrained Policy Optimisation (CPO). We decided to disregard an implementation of an acceleration limit, as computing 
+$$\text{robot\_pos (vector)} + \text{step\_size} \cdot [\cos(\text{direction}), \sin(\text{direction})]$$
+takes the same time complexity of $O(1)$, and it mainly focuses on constraining the actual energy used through electricity. A turning constraint was incorporated for two primary reasons:
+\begin{itemize}
+    \item Unconstrained turning leads to slightly longer paths early in training, resulting in higher step counts per episode.
+    \item Constrained turning leads to more predictable, easier-to-calculate, and, from a hardware perspective, more continuous paths to the goal.
+\end{itemize}
+However, deciding to elaborate on this continuous structure was implemented lightly.
+
+After careful analysis of different ways to implement the constraint factors, we considered 2 methods to implement these constraint factors in our model:
+\begin{enumerate}
+    \item Limiting the number of FFN input vectors in an Agent’s path
+    \item Limiting the erraticness of the robot's turning through a $dir_{/max}$ constraint.
+\end{enumerate}
+
+The traditional CPO approach (used in []’s case study) applies constraints after every Agent action, whereas Lagrangian PPO optimises a Lagrange multiplier parameter $w_{\text{turn}}$\footnote{Lagrange multipliers in machine learning essentially perform traditional gradient descent but are limited by a constraint.} that decides the penalty the robot should receive, calculated as:
+$$\text{turn\_penalty} = w_{\text{turn}} \cdot |dir_{/max}|$$
+$$dir_{/max} = \theta_{\text{new}} - \theta_{\text{current}}$$
+A scaling factor that represents the angular difference between the previous robot action direction and the current one.
+
+However, due to our research objectives, we decided to use Lagrangian PPO because of 2 key reasons:
+\begin{enumerate}
+    \item CPO requires high computational effort that could stall our vital programs that record statistics and our overall training time.
+    \item Lagrangian PPO is very stable and forgiving in deep learning frameworks. (Content Learning, H.A. and Harvard Research, 2025)
+\end{enumerate}
+Our model is structured to contain very few constraints to preserve model simplicity and isolate the impact of energy penalties.
+
+\subsection{Common Algorithms Used in Robot Navigation}
+
+\subsection{Physical Environment and Modelling Dynamics}
+
+\section{Methodology}
+\subsection{Resources Used in the Creation of the Model}
+\subsection{3.x \dots}
+
+\section{Experiment Setup}
+
+\appendix
+\section*{Footnotes}
+\begin{enumerate}
+    \item These algorithms were used to simulate a fully trained AI, but they work completely differently, as a normal A* is actually still the most compute-energy-efficient.
+    \item LOS (Line-of-Sight) pruning is an algorithm that collapses rasterised grid steps into continuous line vectors.
+    \item Lagrange multipliers in machine learning essentially perform traditional gradient descent but are limited by a constraint.
+\end{enumerate}
+
+\end{document}
