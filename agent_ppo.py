@@ -76,18 +76,55 @@ class ActorCritic(nn.Module):
         
         return mean, stds, value 
 
-    @torch.no_grad() 
-    def get_action_and_value(self, state_list): # add exploration noise 
-        state_tensor = torch.FloatTensor(state_list) 
+    #__________ Network sampling ________
 
-        with torch.no_grad(): 
-            mean, stds, value = self.forward(state_tensor) 
-            dist_obj = dist.Normal(mean, stds) 
-            action = dist_obj.sample() 
-            log_prob = dist_obj.log_prob(action).sum(dim=-1) 
-        
-        return action.numpy(), log_prob, value, mean, stds 
+    def get_action_distribution(self, mean, stds):
+            angle_dist = dist.TransformedDistribution(
+                dist.Normal(mean[..., 0], stds[..., 0]),
+                [
+                    dist.TanhTransform(),
+                    dist.AffineTransform(loc=0.0, scale=math.pi)
+                ]
+            )
+    
+            step_dist = dist.Normal(mean[..., 1], stds[..., 1])
+    
+            return angle_dist, step_dist
 
+    @torch.no_grad()
+    def get_action_and_value(self, state_list):
+        state_tensor = torch.FloatTensor(state_list)
+
+        mean, stds, value = self.forward(state_tensor)
+        angle_dist, step_dist = self.get_action_distribution(mean, stds)
+        angle = angle_dist.sample()
+        step_size = step_dist.sample()
+
+        action = torch.stack([angle, step_size], dim=-1)
+        log_prob = angle_dist.log_prob(angle) + step_dist.log_prob(step_size)
+
+        return action.numpy(), log_prob, value, mean, stds
+
+    def evaluate_actions(self, states, actions):
+        mean, stds, value = self.forward(states)
+
+        angle_dist, step_dist = self.get_action_distribution(mean, stds)
+
+        angles = actions[:, 0]
+        step_sizes = actions[:, 1]
+
+        angle_log_prob = angle_dist.log_prob(angles)
+        step_log_prob = step_dist.log_prob(step_sizes)
+
+        new_log_prob = angle_log_prob + step_log_prob
+
+        angle_entropy = dist.Normal(mean[:, 0], stds[:, 0]).entropy()
+        step_entropy = step_dist.entropy()
+
+        entropy = angle_entropy + step_entropy
+
+        return new_log_prob, entropy, value
+    
     @torch.no_grad() 
     def store_transition(self, state, action, reward, log_prob, done, value, training_steps): 
         self.states[training_steps] = torch.FloatTensor(state) 
@@ -182,7 +219,8 @@ class ActorCritic(nn.Module):
             reward -= 10 
 
         return reward, False, False 
-        
+
+    @staticmethod    
     def InitializeWeights(m, Type): # Types can be "Orth", "Kaim", or "Xaiv" 
         if isinstance(m, nn.Linear): 
             if Type == "orth": 
@@ -194,8 +232,9 @@ class ActorCritic(nn.Module):
             else: 
                 raise TypeError 
 
-            nn.init(m.bias, 0.0) 
+            nn.init.constant_(m.bias, 0.0) 
 
+    @staticmethod
     @torch.no_grad() 
     def LogDataToCSV(Data1, Data2, Data3, CSVType, agnt_id): # Can be 'eps', or 'trg' 
         if CSVType == 'eps': 
@@ -220,7 +259,8 @@ class ActorCritic(nn.Module):
                 writer = csv.writer(file)
                 writer.writerow(Data2)
 
-    @torch.nog_grad            
+    @staticmethod
+    @torch.no_grad()            
     def GetRobotAccuracy(A_star_path: np.array, Robot_path: np.array):
         dtw_distance, alignment_path = fastdtw(A_star_path, Robot_path, dist=euclidean)
         return dtw_distance / len(alignment_path)
@@ -279,6 +319,8 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             maze_solved = False 
         
             RegionsExplored = set() 
+            # initialize robot_path
+            robot_path = [robot_pos.copy()]
             
             for step in range(network.MaxSteps):  
                 # added for loop to stop an episode after a set amount of steps (to avoid the robot 
@@ -291,13 +333,16 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                 
                 # forward pass 
                 Action, log_prob, value, _, _, = network.get_action_and_value(State) 
-                action_directions += Action[0] 
-                action_steps_sizes += Action[1] 
+                sum_action_directions += Action[0] 
+                sum_action_steps_sizes += Action[1] 
 
                 # virtually update the robot 
-                angle, step_size = Action[0] % (2*math.pi), Action[1]  
+                angle, step_size = Action[0], Action[1]  
                 new_pos = robot_pos + step_size * np.array([np.cos(angle), np.sin(angle)]) 
                 new_angle = angle 
+
+                # add position to the robot's path
+                robot_path.append(new_pos.copy())
                 
                 # Accummulate turn delta for lagrangian optimization
                 angle_diff_step = abs((new_angle - robot_angle + math.pi) % (2 * math.pi) - math.pi)
@@ -334,6 +379,8 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                     if maze_solved: 
                         past += 1 
                         x += 1 
+                        network.EnergyUsed = 0
+                        episode_reward = 0
                     else: 
                         not_past += 1 
                     
@@ -361,7 +408,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             w_optimizer.step()
 
             # Calculate the accuracy of the robot compared to the A_star algorithm
-            ACCURACY = network.GetRobotAccuracy(network.actions.numpy(), A_star_path)
+            ACCURACY = network.GetRobotAccuracy(np.asarray(robot_path), np.asarray(A_star_path))
 
             # Log data to the CSV
             Episode_Payload = [episode_count, episode_reward, episode_length, 1 if maze_solved else 0, sucess_rate, network.EnergyUsed, len(RE)] 
@@ -408,9 +455,9 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                 next_done = dones[t] 
 
             # normalize advantages 
-            advantages_st_dist, advantages_mean = torch.std_mean(advantages) 
+            advantages_st_dist, advantages_mean = torch.std_mean(advantages)
+            CriticUpdationNorm = advantages + values
             advantages = (advantages - advantages_mean) / (advantages_st_dist + 1e-8) 
-            CriticUpdationNorm = advantages + values 
 
             NumberOfBeansInMyBowl = 4 # number of epochs 
 
@@ -419,7 +466,8 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                 Shuffled_indices = torch.randperm(MaxSteps) 
                 for i in range(0, MaxSteps, 64): # divide into mini batches for highly optimized progressive training 
                     Batch = Shuffled_indices[i: i + 64] 
-                    Batch_states = states[Batch] 
+                    Batch_states = states[Batch]
+                    Batch_actions = actions[Batch] 
                     Batch_log_probs = log_probs[Batch] 
 
                     # advanteges 
@@ -427,17 +475,20 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                     b_advantages = advantages[Batch] 
 
                     # clipped surrogate objective (actor loss, critic loss, total_loss) 
-                    _, b_new_log_prob, b_value, mean, stds = network.get_action_and_value(Batch_states) 
+                    b_new_log_prob, entropy, b_value = network.evaluate_actions(
+                        Batch_states,
+                        Batch_actions
+                    ) 
                     probability_ratio = torch.exp(b_new_log_prob - Batch_log_probs) 
+
+                    # entropy encourages exploration
+                    entropy = entropy.mean()
 
                     # components 
                     surrogate_1 = probability_ratio * b_advantages 
                     surrogate_2 = torch.clamp(probability_ratio, 0.8, 1.2) * b_advantages 
 
-                    # entropy object: This connects the neural outputs to the total loss funciton 
-                    dist_obj = torch.distributions.Normal(mean, stds) 
-                    entropy = dist_obj.entropy().sum(dim=-1).mean() 
-
+                    # Total losses
                     ACTOR_LOSS = torch.mean(-torch.min(surrogate_1, surrogate_2)) 
                     CRITIC_LOSS = F.mse_loss(b_value, b_CriticUpdationNorm) 
                     TOTAL_LOSS = ACTOR_LOSS + network.BerryGoodKoreanDataHacker * CRITIC_LOSS - network.KoreanMumSpecial * entropy 
