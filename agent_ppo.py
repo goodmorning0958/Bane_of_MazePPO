@@ -6,18 +6,21 @@ import matplotlib.pyplot as plt
 import numpy as np 
 import math 
 import time 
-import csv 
+import csv
+from fastdtw import fastdtw
+from scipy.spatial.distance import euclidean
 
 from Bane_of_mazePPO.training_example_generator import get_new_training_example 
 from Bane_of_mazePPO.agent_viewer import Dashboard 
-from Bane_of_mazePPO.raycaster import raycaster
+from Bane_of_mazePPO.simulated_LiDAR import LiDAR
+from Bane_of_mazePPO.A_star_search import Normal_A_star_search
 
-raycaster_env = raycaster() 
+raycaster_env = LiDAR() 
 
 class ActorCritic(nn.Module): 
     # input layer: 32 distances, distance_to_finish  
     # output layer: [direction, step_size] 
-    def __init__(self, h1, h2, VARNumberOfRayCasts, VARAllowedEnergy, inputs, action_dim=2): 
+    def __init__(self, h1, h2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, inputs, action_dim=2): 
         super().__init__() 
         self.MaxSteps = 200 
         self.clear_memory(self.MaxSteps) 
@@ -40,12 +43,11 @@ class ActorCritic(nn.Module):
         self.sd = nn.Parameter(torch.tensor(20)) 
         
         # Lagrangian constraints for Turn Energy Harshness
-        self.log_w_turn = nn.Parameter(torch.tensor(math.log(0.05))) 
-        self.target_max_turn = 0.1 
+        self.log_w_turn = nn.Parameter(torch.tensor(math.log(0.05)))  
+        self.target_max_turn = VARtargetMaxTurn
 
     @property
     def w_turn(self):
-        # ensure w_turn remains positive
         return torch.exp(self.log_w_turn)
 
     @torch.no_grad() 
@@ -195,22 +197,34 @@ class ActorCritic(nn.Module):
             nn.init(m.bias, 0.0) 
 
     @torch.no_grad() 
-    def LogDataToCSV(Data1, Data2, Data3, CSVType): # Can be 'eps', or 'trg' 
+    def LogDataToCSV(Data1, Data2, Data3, CSVType, agnt_id): # Can be 'eps', or 'trg' 
         if CSVType == 'eps': 
-            with open('EpisodeData.csv', mode='a', newline='') as file: 
+            with open(f'EpisodeData.csv{agnt_id}', mode='a', newline='') as file: 
                 writer = csv.writer(file) 
                 writer.writerow(Data1) 
-            with open('RobotActions.csv', mode='a', newline='') as file: 
+            with open(f'RobotActions.csv{agnt_id}', mode='a', newline='') as file: 
                 writer = csv.writer(file) 
                 writer.writerow(Data2) 
-            with open('ActionData.csv', mode='a', newline='') as file: 
+            with open(f'ActionData.csv{agnt_id}', mode='a', newline='') as file: 
                 writer = csv.writer(file) 
                 writer.writerow(Data3) 
-        else: 
-            with open('TrainingData.csv', mode='a', newline='') as file: 
+        elif CSVType == 'trg':
+            with open(f'TrainingData.csv{agnt_id}', mode='a', newline='') as file: 
                 writer = csv.writer(file) 
                 writer.writerow(Data1) 
+        else:
+            with open(f'Mazes{agnt_id}', mode='a', newline='') as file:
+                 writer = csv.writer(file)
+                 writer.writerow(Data1)
+            with open(f'Accuracys{agnt_id}', mode='a', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow(Data2)
 
+    @torch.nog_grad            
+    def GetRobotAccuracy(A_star_path: np.array, Robot_path: np.array):
+        dtw_distance, alignment_path = fastdtw(A_star_path, Robot_path, dist=euclidean)
+        return dtw_distance / len(alignment_path)
+    
 @torch.no_grad() 
 def GetState(robot_pos, walls):  
     distances = [] 
@@ -220,7 +234,7 @@ def GetState(robot_pos, walls):
     return distances 
 
 
-def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARWeightInitType): 
+def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARWeightInitType, VARtargetMaxTurn, agnt): 
     if __name__ == '__main__': 
         past = 0 
         x = 0 
@@ -235,7 +249,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         sum_action_directions = 0 
         sum_action_steps_sizes = 0 
 
-        network = ActorCritic(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs) 
+        network = ActorCritic(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, NNinputs) 
         optimizer = torch.optim.Adam(network.parameters(), lr=3e-4) 
         
         # SEPARATE OPTIMIZER FOR LAGRANGIAN HARSHNESS MULTIPLIER
@@ -255,6 +269,9 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             walls_np = np.array(walls) 
             maze_np = np.array(pixel_grid) 
             robot_angle = 0 
+
+            # calculate the optimal A* path to measure accuracy
+            A_star_path = Normal_A_star_search(pixel_grid.tolist())
             
             total_turn_delta = 0.0
 
@@ -262,7 +279,6 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             maze_solved = False 
         
             RegionsExplored = set() 
-
             
             for step in range(network.MaxSteps):  
                 # added for loop to stop an episode after a set amount of steps (to avoid the robot 
@@ -344,10 +360,15 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             turn_constraint_loss.backward()
             w_optimizer.step()
 
+            # Calculate the accuracy of the robot compared to the A_star algorithm
+            ACCURACY = network.GetRobotAccuracy(network.actions.numpy(), A_star_path)
+
+            # Log data to the CSV
             Episode_Payload = [episode_count, episode_reward, episode_length, 1 if maze_solved else 0, sucess_rate, network.EnergyUsed, len(RE)] 
-            Actions = network.actions 
             action_payload = [sum_action_directions / episode_length, sum_action_steps_sizes / episode_length] 
-            network.LogDataToCSV(Episode_Payload, Actions, action_payload, 'eps') 
+    
+            network.LogDataToCSV(Episode_Payload, network.actions.numpy(), action_payload, 'eps', agnt)
+            network.LogDataToCSV(pixel_grid, ACCURACY, None, 'mze', agnt)
    
             episode_count += 1 
             episode_reward = 0 
@@ -355,7 +376,6 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             sum_action_directions = 0 
             sum_action_steps_sizes = 0 
             RE = set() 
-                
                 
             # innitialize the tensors here so network is never messed aroudn with for speed 
             states = network.states 
@@ -435,6 +455,6 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                     optimizer.step() 
 
                     Training_Payload = [steps, sucess_rate, TOTAL_LOSS, ACTOR_LOSS, CRITIC_LOSS, entropy, b_advantages] 
-                    network.LogDataToCSV(Training_Payload, None, None, 'trg') 
+                    network.LogDataToCSV(Training_Payload, None, None, 'trg', agnt) 
 
             network.clear_memory(MaxSteps)
