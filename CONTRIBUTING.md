@@ -8,6 +8,11 @@ To edit or create new code files:
 You can also do this in VS Code by:
  - clone the repo
  - make a folder called Bane_of_mazePPO, and insert your contents.
- - make vs_code be in the Bane_of_mazePPO folder on your computer
- - To add changes: run git add . ; git commit -m "Update Bane_of_mazePPO" ; git push
+ - make vs_code be in the Bane_of_mazePPO folder on your computer:
+ -  If you are on Windows:
+     - run cd C:\Users\[name]\.vscode\Bane_of_mazePPO
+ -  If you are on Mac:
+     - run cd /Users/[name/.vscode/Bane_of_mazePPO
+       
+ - To add changes: run git add . ; git commit -m "Update Bane_of_mazePPO"; git push
   
