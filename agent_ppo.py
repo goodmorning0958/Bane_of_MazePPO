@@ -12,7 +12,7 @@ from scipy.spatial.distance import euclidean
 
 from Bane_of_mazePPO.training_example_generator import get_new_training_example 
 from Bane_of_mazePPO.agent_viewer import Dashboard 
-from Bane_of_mazePPO.simulated_LiDAR import LiDAR
+from Bane_of_mazePPO.simulated_LiDAR import LiDAR 
 from Bane_of_mazePPO.A_star_search import Normal_A_star_search
 
 raycaster_env = LiDAR() 
@@ -40,7 +40,7 @@ class ActorCritic(nn.Module):
         self.val_out = nn.Linear(h2, 1) 
 
         self.k = nn.Parameter(torch.tensor(5.89)) 
-        self.sd = nn.Parameter(torch.tensor(20)) 
+        self.sd = nn.Parameter(torch.tensor(20.0)) 
         
         # Lagrangian constraints for Turn Energy Harshness
         self.log_w_turn = nn.Parameter(torch.tensor(math.log(0.05)))  
@@ -79,17 +79,17 @@ class ActorCritic(nn.Module):
     #__________ Network sampling ________
 
     def get_action_distribution(self, mean, stds):
-            angle_dist = dist.TransformedDistribution(
-                dist.Normal(mean[..., 0], stds[..., 0]),
-                [
-                    dist.TanhTransform(),
-                    dist.AffineTransform(loc=0.0, scale=math.pi)
-                ]
-            )
-    
-            step_dist = dist.Normal(mean[..., 1], stds[..., 1])
-    
-            return angle_dist, step_dist
+        angle_dist = dist.TransformedDistribution(
+            dist.Normal(mean[..., 0], stds[..., 0]),
+            [
+                dist.TanhTransform(),
+                dist.AffineTransform(loc=0.0, scale=math.pi)
+            ]
+        )
+
+        step_dist = dist.Normal(mean[..., 1], stds[..., 1])
+
+        return angle_dist, step_dist
 
     @torch.no_grad()
     def get_action_and_value(self, state_list):
@@ -97,6 +97,7 @@ class ActorCritic(nn.Module):
 
         mean, stds, value = self.forward(state_tensor)
         angle_dist, step_dist = self.get_action_distribution(mean, stds)
+
         angle = angle_dist.sample()
         step_size = step_dist.sample()
 
@@ -188,13 +189,11 @@ class ActorCritic(nn.Module):
             4: 0.0002455, 
         } 
         time = Times[self.VARNumberOfRayCasts] 
-        # added a way for the robot to optimize its curriculum learning (sucess rate) 
+        
         step_size = max(abs(step_size), 1e-5) 
         
-        # Turn sharpness penalty calculation (heading difference wrapped to [-pi, pi])
-        angle_diff = (new_angle - robot_angle + math.pi) % (2 * math.pi) - math.pi
+        angle_diff = (new_angle - robot_angle + math.pi) % (2 * math.pi) - math.pi 
         
-        # USE .item() HERE SO PPO BACKPROP DOESNT INTERFERE WITH LAGRANGIAN UPDATE
         turn_penalty = self.w_turn.item() * abs(angle_diff) 
         
         reward = - (0.01 + time + turn_penalty) - ((1-sucess_rate) / 10) 
@@ -203,7 +202,7 @@ class ActorCritic(nn.Module):
         if run_into_wall:  
             return reward - 10, True, False 
 
-        if in_dead_end: 
+        if in_dead_end:  
             return reward - 10, False, False 
         
         if distance_finish < 0.5: # Needs a small threshold rather than strict == 0 
@@ -220,19 +219,19 @@ class ActorCritic(nn.Module):
 
         return reward, False, False 
 
-    @staticmethod    
-    def InitializeWeights(m, Type): # Types can be "Orth", "Kaim", or "Xaiv" 
-        if isinstance(m, nn.Linear): 
-            if Type == "orth": 
-                nn.init.orthogonal_(m.weight, gain=torch.sqrt(2)) 
-            elif Type == "Kaim": 
-                nn.init.kaiming_normal_(m.weight, nonlinearity="relu") 
-            elif Type == "Xaiv": 
-                nn.init.xavier_uniform_(m.weight) 
-            else: 
-                raise TypeError 
+    def InitializeWeights(self, Type):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                if Type == "orth":
+                    nn.init.orthogonal_(m.weight, gain=math.sqrt(2))
+                elif Type == "Kaim":
+                    nn.init.kaiming_normal_(m.weight, nonlinearity="relu")
+                elif Type == "Xaiv":
+                    nn.init.xavier_uniform_(m.weight)
+                else:
+                    raise TypeError(Type)
 
-            nn.init.constant_(m.bias, 0.0) 
+                nn.init.constant_(m.bias, 0.0)
 
     @staticmethod
     @torch.no_grad() 
@@ -253,8 +252,8 @@ class ActorCritic(nn.Module):
                 writer.writerow(Data1) 
         else:
             with open(f'Mazes{agnt_id}', mode='a', newline='') as file:
-                 writer = csv.writer(file)
-                 writer.writerow(Data1)
+                writer = csv.writer(file)
+                writer.writerow(Data1)
             with open(f'Accuracys{agnt_id}', mode='a', newline='') as file:
                 writer = csv.writer(file)
                 writer.writerow(Data2)
@@ -292,7 +291,6 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         network = ActorCritic(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, NNinputs) 
         optimizer = torch.optim.Adam(network.parameters(), lr=3e-4) 
         
-        # SEPARATE OPTIMIZER FOR LAGRANGIAN HARSHNESS MULTIPLIER
         w_optimizer = torch.optim.Adam([network.log_w_turn], lr=1e-3)
         
         dashboard = Dashboard() 
@@ -317,10 +315,20 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
 
             network.clear_memory(network.MaxSteps)  
             maze_solved = False 
-        
-            RegionsExplored = set() 
+    
+            RegionsExplored = set()
+            network.EnergyUsed = 0
+
             # initialize robot_path
             robot_path = [robot_pos.copy()]
+
+            last_episode_reward = 0
+            last_episode_length = 0
+            last_maze_solved = False
+            last_energy_used = 0
+            last_regions_explored = 0
+            last_accuracy = 0
+            last_pixel_grid = pixel_grid
             
             for step in range(network.MaxSteps):  
                 # added for loop to stop an episode after a set amount of steps (to avoid the robot 
@@ -332,7 +340,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                 State.append(maze_size) 
                 
                 # forward pass 
-                Action, log_prob, value, _, _, = network.get_action_and_value(State) 
+                Action, log_prob, value, _, _ = network.get_action_and_value(State) 
                 sum_action_directions += Action[0] 
                 sum_action_steps_sizes += Action[1] 
 
@@ -344,7 +352,6 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                 # add position to the robot's path
                 robot_path.append(new_pos.copy())
                 
-                # Accummulate turn delta for lagrangian optimization
                 angle_diff_step = abs((new_angle - robot_angle + math.pi) % (2 * math.pi) - math.pi)
                 total_turn_delta += angle_diff_step
 
@@ -361,6 +368,8 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                 distance_finish = np.linalg.norm(end_point - new_pos) 
                 Reward, done, maze_solved = network.reward(run_into_wall, in_dead_end, distance_finish, region_unexplored, robot_pos, new_pos, step_size, sucess_rate, robot_angle, new_angle) 
                 episode_reward += Reward 
+                episode_length += 1
+
                 # append to tuples 
                 network.store_transition(State, Action, Reward, log_prob, done, value, step) 
 
@@ -369,21 +378,31 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
 
                 steps += 1 
 
-                total_actions = max(1, past + not_past) 
-                if total_actions == 0: 
+                completed_actions = past + not_past
+                if completed_actions == 0: 
                     sucess_rate = 1 
                 else: 
-                    sucess_rate = past / total_actions 
+                    sucess_rate = past / completed_actions 
             
                 if done: 
+                    last_episode_reward = episode_reward
+                    last_episode_length = episode_length
+                    last_maze_solved = maze_solved
+                    last_energy_used = network.EnergyUsed
+                    last_regions_explored = len(RegionsExplored)
+                    last_accuracy = network.GetRobotAccuracy(np.asarray(robot_path), np.asarray(A_star_path))
+                    last_pixel_grid = pixel_grid
+
                     if maze_solved: 
                         past += 1 
                         x += 1 
-                        network.EnergyUsed = 0
-                        episode_reward = 0
                     else: 
                         not_past += 1 
-                    
+
+                    network.EnergyUsed = 0
+                    episode_reward = 0
+                    episode_length = 0
+
                     # Reset environment state without breaking rollout 
                     start_point, end_point, maze_size, grid_distance, walls, pixel_grid = get_new_training_example(x, network.k, network.sd) 
                     robot_pos = np.array(start_point, dtype=np.float32) 
@@ -391,38 +410,34 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                     walls_np = np.array(walls) 
                     maze_np = np.array(pixel_grid) 
                     robot_angle = 0 
-                    RE = RegionsExplored 
-                    RegionsExplored = set() 
+                    maze_solved = False
+                    RegionsExplored = set()
+                    robot_path = [robot_pos.copy()]
+                    A_star_path = Normal_A_star_search(pixel_grid.tolist())
                 else: 
                     robot_pos = new_pos 
                     robot_angle = new_angle 
 
-                episode_length += 1 
+            if episode_length > 0:
+                Episode_Payload = [episode_count, episode_reward, episode_length, 1 if maze_solved else 0, sucess_rate, network.EnergyUsed, len(RegionsExplored)]
+                ACCURACY = network.GetRobotAccuracy(np.asarray(robot_path), np.asarray(A_star_path))
+                LoggedPixelGrid = pixel_grid
+            else:
+                Episode_Payload = [episode_count, last_episode_reward, last_episode_length, 1 if last_maze_solved else 0, sucess_rate, last_energy_used, last_regions_explored]
+                ACCURACY = last_accuracy
+                LoggedPixelGrid = last_pixel_grid
 
-            # a way for the AI to optimize its energy efficiency.
-            avg_turn_delta = total_turn_delta / network.MaxSteps
-            turn_constraint_loss = - network.w_turn * (avg_turn_delta - network.target_max_turn)
-            
-            w_optimizer.zero_grad()
-            turn_constraint_loss.backward()
-            w_optimizer.step()
-
-            # Calculate the accuracy of the robot compared to the A_star algorithm
-            ACCURACY = network.GetRobotAccuracy(np.asarray(robot_path), np.asarray(A_star_path))
-
-            # Log data to the CSV
-            Episode_Payload = [episode_count, episode_reward, episode_length, 1 if maze_solved else 0, sucess_rate, network.EnergyUsed, len(RE)] 
-            action_payload = [sum_action_directions / episode_length, sum_action_steps_sizes / episode_length] 
+            action_payload = [sum_action_directions / network.MaxSteps, sum_action_steps_sizes / network.MaxSteps] 
     
             network.LogDataToCSV(Episode_Payload, network.actions.numpy(), action_payload, 'eps', agnt)
-            network.LogDataToCSV(pixel_grid, ACCURACY, None, 'mze', agnt)
+            network.LogDataToCSV(LoggedPixelGrid, ACCURACY, None, 'mze', agnt)
    
             episode_count += 1 
             episode_reward = 0 
             network.EnergyUsed = 0 
+            episode_length = 0
             sum_action_directions = 0 
             sum_action_steps_sizes = 0 
-            RE = set() 
                 
             # innitialize the tensors here so network is never messed aroudn with for speed 
             states = network.states 
@@ -433,30 +448,40 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             values = network.values 
             MaxSteps = network.MaxSteps 
 
-            Shuffled_indices = torch.randperm(MaxSteps) 
             Wgamma = 0.99 
             Wlambda = 0.99 
 
-            next_advantege = 0 
-            next_value = 0 
-            next_done = 1 
-                
+            if dones[MaxSteps - 1].item() == 1.0:
+                next_value = torch.tensor(0.0, dtype=torch.float32)
+            else:
+                FinalState = GetState(robot_pos, walls)
+                FinalState.append(np.linalg.norm(end_point - robot_pos))
+                FinalState.append(maze_size)
+
+                FinalStateTensor = torch.FloatTensor(FinalState)
+                _, _, next_value = network.forward(FinalStateTensor)
+                next_value = next_value.squeeze(-1)
+
             # Calculate GAE (advantages) 
             advantages = torch.zeros(MaxSteps, dtype=torch.float32) 
+            next_advantage = torch.tensor(0.0, dtype=torch.float32)
+
             for t in reversed(range(MaxSteps)): 
-                # reversed GAE and temporial differincial error. Put the errors in the bag bro 
-                done_flag = 1 - next_done 
-                temp_diff_error = rewards[t] + (Wgamma * next_value * done_flag) - values[t] 
-                advantage = temp_diff_error + (Wgamma * Wlambda) * done_flag * next_advantege 
+                if t == MaxSteps - 1:
+                    next_value_t = next_value
+                else:
+                    next_value_t = values[t + 1]
+
+                done_flag = 1.0 - dones[t]
+                temp_diff_error = rewards[t] + (Wgamma * next_value_t * done_flag) - values[t] 
+                advantage = temp_diff_error + (Wgamma * Wlambda) * done_flag * next_advantage 
                 advantages[t] = advantage 
                 
-                next_advantege = advantage 
-                next_value = values[t] 
-                next_done = dones[t] 
+                next_advantage = advantage
 
             # normalize advantages 
             advantages_st_dist, advantages_mean = torch.std_mean(advantages)
-            CriticUpdationNorm = advantages + values
+            returns = advantages + values
             advantages = (advantages - advantages_mean) / (advantages_st_dist + 1e-8) 
 
             NumberOfBeansInMyBowl = 4 # number of epochs 
@@ -471,7 +496,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                     Batch_log_probs = log_probs[Batch] 
 
                     # advanteges 
-                    b_CriticUpdationNorm = CriticUpdationNorm[Batch] 
+                    b_returns = returns[Batch] 
                     b_advantages = advantages[Batch] 
 
                     # clipped surrogate objective (actor loss, critic loss, total_loss) 
@@ -490,7 +515,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
 
                     # Total losses
                     ACTOR_LOSS = torch.mean(-torch.min(surrogate_1, surrogate_2)) 
-                    CRITIC_LOSS = F.mse_loss(b_value, b_CriticUpdationNorm) 
+                    CRITIC_LOSS = F.mse_loss(b_value, b_returns) 
                     TOTAL_LOSS = ACTOR_LOSS + network.BerryGoodKoreanDataHacker * CRITIC_LOSS - network.KoreanMumSpecial * entropy 
 
                     # initialize your son and your daughter             
@@ -500,12 +525,20 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                     TOTAL_LOSS.backward() 
 
                     # gradient clipping 
-                    torch.nn.utils.clip_grad_norm_(network.parameters(), max_grad_norm=0.5) 
+                    torch.nn.utils.clip_grad_norm_(network.parameters(), max_norm=0.5) 
 
                     # Calculate Adam's Phone-bill Optimization 
                     optimizer.step() 
 
-                    Training_Payload = [steps, sucess_rate, TOTAL_LOSS, ACTOR_LOSS, CRITIC_LOSS, entropy, b_advantages] 
+                    Training_Payload = [
+                        steps,
+                        sucess_rate,
+                        TOTAL_LOSS.item(),
+                        ACTOR_LOSS.item(),
+                        CRITIC_LOSS.item(),
+                        entropy.item(),
+                        b_advantages.mean().item()
+                    ] 
                     network.LogDataToCSV(Training_Payload, None, None, 'trg', agnt) 
 
             network.clear_memory(MaxSteps)
