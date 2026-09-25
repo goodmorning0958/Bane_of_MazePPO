@@ -264,7 +264,13 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
     sum_action_steps_sizes = 0 
 
     network = ActorCritic(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, NNinputs) 
-    optimizer = torch.optim.Adam(network.parameters(), lr=3e-4) 
+
+    ppo_parameters = [
+    parameter for name, parameter in network.named_parameters()
+    if name != "log_w_turn"
+    ]
+
+    optimizer = torch.optim.Adam(ppo_parameters, lr=3e-4) 
     w_optimizer = torch.optim.Adam([network.log_w_turn], lr=1e-3)
     
     dashboard = Dashboard() 
@@ -370,6 +376,9 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                 robot_pos = new_pos 
                 robot_angle = new_angle 
 
+            # run at low FPS
+            time.sleep(1)
+            
         if episode_length > 0:
             Episode_Payload = [episode_count, episode_reward, episode_length, 1 if maze_solved else 0, sucess_rate, network.EnergyUsed, len(RegionsExplored)]
             ACCURACY = network.GetRobotAccuracy(np.asarray(robot_path), np.asarray(A_star_path))
@@ -460,13 +469,6 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                 torch.nn.utils.clip_grad_norm_(network.parameters(), max_norm=0.5) 
                 optimizer.step() 
 
-                # Dual update for turning penalty constraint multiplier
-                avg_turn = total_turn_delta / MaxSteps
-                w_turn_loss = -network.log_w_turn * (avg_turn - network.target_max_turn)
-                w_optimizer.zero_grad()
-                w_turn_loss.backward()
-                w_optimizer.step()
-
                 Training_Payload = [
                     steps,
                     sucess_rate,
@@ -476,7 +478,13 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                     entropy.item(),
                     b_advantages.mean().item()
                 ] 
-                network.LogDataToCSV(Training_Payload, None, None, 'trg', agnt) 
+                network.LogDataToCSV(Training_Payload, None, None, 'trg', agnt)
 
+        # Dual update for turning penalty constraint multiplier
+        avg_turn = total_turn_delta / MaxSteps
+        w_turn_loss = -network.w_turn * (avg_turn - network.target_max_turn)
+        w_optimizer.zero_grad()
+        w_turn_loss.backward()
+        w_optimizer.step()
         network.clear_memory(MaxSteps)
 
