@@ -322,7 +322,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             sum_action_steps_sizes += Action[1] 
 
             # Update robot detais
-            angle, step_size = math.tanh(Action[0]) * math.pi, math.tahn(Action[1]) * 5.0  
+            angle, step_size = math.tanh(Action[0]) * math.pi, math.tanh(Action[1]) * 5.0  
             new_pos = robot_pos + step_size * np.array([np.cos(angle), np.sin(angle)]) 
             new_angle = angle 
 
