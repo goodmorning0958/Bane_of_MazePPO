@@ -16,7 +16,6 @@ from A_star_search import Normal_A_star_search
 
 raycaster_env = LiDAR() 
 
-
 class ActorCritic(nn.Module): 
     def __init__(self, h1, h2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, inputs, action_dim=2): 
         super().__init__() 
@@ -245,7 +244,7 @@ class ActorCritic(nn.Module):
 def GetState(robot_pos, walls, VarNumberOfRayCasts):   
     distances = [] 
     angle_step = (2 * math.pi) / VarNumberOfRayCasts 
-    for dir_ in range(32): 
+    for dir_ in range(VarNumberOfRayCasts): 
         distances.append(raycaster_env.CastRay(np.asarray(robot_pos), walls, math.cos(dir_ * angle_step), math.sin(dir_ * angle_step))) 
     return distances 
 
@@ -263,7 +262,14 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
     sum_action_directions = 0 
     sum_action_steps_sizes = 0 
 
-    network = ActorCritic(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, NNinputs) 
+    network = ActorCritic(
+        h1=NNh1, 
+        h2=NNh2, 
+        VARNumberOfRayCasts=VARNumberOfRayCasts, 
+        VARAllowedEnergy=VARAllowedEnergy, 
+        VARtargetMaxTurn=VARtargetMaxTurn, 
+        inputs=NNinputs
+    )
 
     ppo_parameters = [
     parameter for name, parameter in network.named_parameters()
@@ -304,6 +310,8 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         last_regions_explored = 0
         last_accuracy = 0
         last_pixel_grid = pixel_grid
+
+        buffer_step = 0
         
         for step in range(network.MaxSteps): 
             print(step)
@@ -344,9 +352,10 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             episode_length += 1
 
             # Store transitiion
-            network.store_transition(State, Action, Reward, log_prob, done, value, step) 
+            network.store_transition(State, Action, Reward, log_prob, done, value, buffer_step)
             dashboard.send(maze_np.tolist(), [[new_pos[0], new_pos[1], new_angle]]) 
 
+            buffer_step += 1
             steps += 1 
             completed_actions = past + not_past
             sucess_rate = 1.0 if completed_actions == 0 else past / completed_actions 
@@ -496,7 +505,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         w_optimizer.step()
         network.clear_memory(MaxSteps)
 
-if __name__ == "__name__":
+if __name__ == "__main__":
    StartAgent(
       48,
       24,
