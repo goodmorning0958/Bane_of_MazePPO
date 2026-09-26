@@ -236,7 +236,6 @@ class ActorCritic(nn.Module):
         dtw_distance, alignment_path = fastdtw(A_star_path, Robot_path, dist=euclidean)
         return dtw_distance / len(alignment_path)
 
-
 @torch.no_grad() 
 def GetState(robot_pos, walls, VarNumberOfRayCasts):   
     distances = [] 
@@ -325,7 +324,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             # Update robot detais
             angle, step_size = math.tanh(Action[0]) * math.pi, math.tahn(Action[1]) * 5.0  
             new_pos = robot_pos + step_size * np.array([np.cos(angle), np.sin(angle)]) 
-            new_angle = angle * math.pi 
+            new_angle = angle 
 
             # append action to the robot's path
             robot_path.append(new_pos.copy())
