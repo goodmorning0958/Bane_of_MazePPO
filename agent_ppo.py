@@ -241,10 +241,10 @@ class ActorCritic(nn.Module):
 def GetState(robot_pos, walls, VarNumberOfRayCasts):   
     distances = [] 
     angle_step = (2 * math.pi) / VarNumberOfRayCasts 
-    for dir_ in range(VarNumberOfRayCasts): 
-        distances.append(raycaster_env.CastRay(np.asarray(robot_pos), walls, math.cos(dir_ * angle_step), math.sin(dir_ * angle_step))) 
+    for dir_ in range(VarNumberOfRayCasts):
+        distance = raycaster_env.CastRay(np.asarray(robot_pos), walls, math.cos(dir_ * angle_step), math.sin(dir_ * angle_step))
+        distances.append(distance if distance != float("inf") else 100) 
     return distances 
-
 
 def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARWeightInitType, VARtargetMaxTurn, agnt): 
     past = 0 
