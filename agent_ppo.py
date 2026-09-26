@@ -27,7 +27,8 @@ class ActorCritic(nn.Module):
 
         self.clear_memory(self.MaxSteps) 
         
-        # Actor Network  
+        # Actor Network
+        self.state_norm = nn.LayerNorm(inputs)
         self.act1 = nn.Linear(inputs, h1) 
         self.act2 = nn.Linear(h1, h2) 
         self.out = nn.Linear(h2, action_dim) 
@@ -61,30 +62,26 @@ class ActorCritic(nn.Module):
         self.KoreanMumSpecial = 0.5 
         self.BerryGoodKoreanDataHacker = 0.01 
 
-    def forward(self, state): 
+    def forward(self, state):
+        State_tensor = self.state_norm(torch.tensor(state))
         # Actor 
-        a = F.relu(self.act1(state)) 
+        a = F.relu(self.act1(State_tensor)) 
         a = F.relu(self.act2(a)) 
         mean = self.out(a) 
-        stds = torch.exp(self.log_std) 
+        stds = torch.clamp(torch.exp(self.log_std), min=1e-4, max=5.0)
         
         # Critic 
-        c = F.relu(self.crit1(state)) 
+        c = F.relu(self.crit1(State_tensor)) 
         c = F.relu(self.crit2(c)) 
         value = self.val_out(c).squeeze(-1) 
         
         return mean, stds, value 
 
     def get_action_distribution(self, mean, stds):
-        angle_dist = dist.TransformedDistribution(
-            dist.Normal(mean[..., 0], stds[..., 0]),
-            [
-                dist.TanhTransform(),
-                dist.AffineTransform(loc=0.0, scale=math.pi)
-            ]
-        )
+        angle_dist = dist.Normal(mean[..., 0], stds[..., 0])
         step_dist = dist.Normal(mean[..., 1], stds[..., 1])
         return angle_dist, step_dist
+        
 
     @torch.no_grad()
     def get_action_and_value(self, state_list):
@@ -276,7 +273,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
     if name != "log_w_turn"
     ]
 
-    optimizer = torch.optim.Adam(ppo_parameters, lr=3e-4) 
+    optimizer = torch.optim.Adam(ppo_parameters, lr=1e-4) 
     w_optimizer = torch.optim.Adam([network.log_w_turn], lr=1e-3)
     
     dashboard = Dashboard() 
@@ -292,7 +289,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         maze_np = np.array(pixel_grid) 
         robot_angle = 0.0 
 
-        A_star_path = Normal_A_star_search(pixel_grid.tolist())
+        A_star_path = Normal_A_star_search(np.array(pixel_grid), list(start_point), list(end_point))
         total_turn_delta = 0.0
 
         network.clear_memory(network.MaxSteps)  
@@ -315,20 +312,20 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         
         for step in range(network.MaxSteps): 
             print(step)
-            # Get state (2D LiDAR)
+            # Get state (2D LiDAR) 
             State = GetState(robot_pos, walls, VARNumberOfRayCasts)   
             State.append(float(np.linalg.norm(end_point - robot_pos))) 
-            State.append(float(maze_size)) 
-
+            State.append(float(maze_size))
+        
             # get action
             Action, log_prob, value, _, _ = network.get_action_and_value(State) 
             sum_action_directions += Action[0] 
             sum_action_steps_sizes += Action[1] 
 
             # Update robot detais
-            angle, step_size = Action[0], Action[1]  
+            angle, step_size = math.tanh(Action[0]) * math.pi, math.tahn(Action[1]) * 5.0  
             new_pos = robot_pos + step_size * np.array([np.cos(angle), np.sin(angle)]) 
-            new_angle = angle 
+            new_angle = angle * math.pi 
 
             # append action to the robot's path
             robot_path.append(new_pos.copy())
@@ -453,7 +450,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
 
         advantages_st_dist, advantages_mean = torch.std_mean(advantages)
         returns = advantages + values
-        advantages = (advantages - advantages_mean) / (advantages_st_dist + 1e-8) 
+        advantages = (advantages - advantages_mean) / (torch.clamp(advantages_st_dist, min=1e-8)) 
 
         NumberOfBeansInMyBowl = 4
 
@@ -481,9 +478,9 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                 CRITIC_LOSS = F.mse_loss(b_value, b_returns) 
                 TOTAL_LOSS = ACTOR_LOSS + network.BerryGoodKoreanDataHacker * CRITIC_LOSS - network.KoreanMumSpecial * entropy 
 
+                torch.nn.utils.clip_grad_norm_(network.parameters(), max_norm=0.5)
                 optimizer.zero_grad() 
                 TOTAL_LOSS.backward() 
-                torch.nn.utils.clip_grad_norm_(network.parameters(), max_norm=0.5) 
                 optimizer.step() 
 
                 Training_Payload = [
@@ -514,5 +511,5 @@ if __name__ == "__main__":
       6,
       "orth",
       0.5,
-      agnt=0
+      0
    )
