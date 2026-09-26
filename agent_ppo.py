@@ -9,10 +9,10 @@ import torch.distributions as dist
 from fastdtw import fastdtw
 from scipy.spatial.distance import euclidean
 
-from Bane_of_mazePPO.training_example_generator import get_new_training_example 
-from Bane_of_mazePPO.agent_viewer import Dashboard 
-from Bane_of_mazePPO.simulated_LiDAR import LiDAR 
-from Bane_of_mazePPO.A_star_search import Normal_A_star_search
+from training_example_generator import get_new_training_example 
+from agent_viewer import Dashboard 
+from simulated_LiDAR import LiDAR 
+from A_star_search import Normal_A_star_search
 
 raycaster_env = LiDAR() 
 
@@ -20,7 +20,7 @@ raycaster_env = LiDAR()
 class ActorCritic(nn.Module): 
     def __init__(self, h1, h2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, inputs, action_dim=2): 
         super().__init__() 
-        self.MaxSteps = 200 
+        self.MaxSteps = 50 
         self.inputs = inputs
         self.VARNumberOfRayCasts = VARNumberOfRayCasts 
         self.VARAllowedEnergy = VARAllowedEnergy 
@@ -242,9 +242,9 @@ class ActorCritic(nn.Module):
 
 
 @torch.no_grad() 
-def GetState(robot_pos, walls):   
+def GetState(robot_pos, walls, VarNumberOfRayCasts):   
     distances = [] 
-    angle_step = (2 * math.pi) / 32 
+    angle_step = (2 * math.pi) / VarNumberOfRayCasts 
     for dir_ in range(32): 
         distances.append(raycaster_env.CastRay(np.asarray(robot_pos), walls, math.cos(dir_ * angle_step), math.sin(dir_ * angle_step))) 
     return distances 
@@ -305,24 +305,30 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         last_accuracy = 0
         last_pixel_grid = pixel_grid
         
-        for step in range(network.MaxSteps):  
-            State = GetState(robot_pos, walls)   
+        for step in range(network.MaxSteps): 
+            print(step)
+            # Get state (2D LiDAR)
+            State = GetState(robot_pos, walls, VARNumberOfRayCasts)   
             State.append(float(np.linalg.norm(end_point - robot_pos))) 
             State.append(float(maze_size)) 
-            
+
+            # get action
             Action, log_prob, value, _, _ = network.get_action_and_value(State) 
             sum_action_directions += Action[0] 
             sum_action_steps_sizes += Action[1] 
 
+            # Update robot detais
             angle, step_size = Action[0], Action[1]  
             new_pos = robot_pos + step_size * np.array([np.cos(angle), np.sin(angle)]) 
             new_angle = angle 
 
+            # append action to the robot's path
             robot_path.append(new_pos.copy())
             
             angle_diff_step = abs((new_angle - robot_angle + math.pi) % (2 * math.pi) - math.pi)
             total_turn_delta += angle_diff_step
 
+            # Get state info
             run_into_wall = network.RunnIntoWall(walls, new_pos, robot_pos) 
             in_dead_end, region_pos = network.InDeadEnd(grid_distance, new_pos, walls_np) 
         
@@ -331,11 +337,13 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             if region_unexplored: 
                 RegionsExplored.add(region_tuple) 
 
+            # Get agent reward
             distance_finish = np.linalg.norm(end_point - new_pos) 
             Reward, done, maze_solved = network.reward(run_into_wall, in_dead_end, distance_finish, region_unexplored, robot_pos, new_pos, step_size, sucess_rate, robot_angle, new_angle) 
             episode_reward += Reward 
             episode_length += 1
 
+            # Store transitiion
             network.store_transition(State, Action, Reward, log_prob, done, value, step) 
             dashboard.send(maze_np.tolist(), [[new_pos[0], new_pos[1], new_angle]]) 
 
@@ -415,7 +423,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             next_value = torch.tensor(0.0, dtype=torch.float32)
         else:
             with torch.no_grad():
-                FinalState = GetState(robot_pos, walls)
+                FinalState = GetState(robot_pos, walls, VARNumberOfRayCasts)
                 FinalState.append(float(np.linalg.norm(end_point - robot_pos)))
                 FinalState.append(float(maze_size))
                 FinalStateTensor = torch.FloatTensor(FinalState)
@@ -488,3 +496,14 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         w_optimizer.step()
         network.clear_memory(MaxSteps)
 
+if __name__ == "__name__":
+   StartAgent(
+      48,
+      24,
+      4,
+      100,
+      6,
+      "orth",
+      0.5,
+      agnt=0
+   )

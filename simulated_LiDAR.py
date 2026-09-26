@@ -1,4 +1,4 @@
-class raycaster:
+class LiDAR:
     def CheckIntersection(self, Wall, robot_pos, dx, dy):
         # get the parametric vector equations
         x1, y1 = Wall[0][0], Wall[0][1]
