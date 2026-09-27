@@ -63,7 +63,7 @@ class ActorCritic(nn.Module):
         self.BerryGoodKoreanDataHacker = 0.01 
 
     def forward(self, state):
-        State_tensor = self.state_norm(torch.tensor(state))
+        State_tensor = self.state_norm(torch.as_tensor(state, dtype=torch.float32))
         # Actor 
         a = F.relu(self.act1(State_tensor)) 
         a = F.relu(self.act2(a)) 
@@ -126,7 +126,15 @@ class ActorCritic(nn.Module):
 
     @torch.no_grad() 
     def InDeadEnd(self, grid_distance, robot_pos, segments): 
-        region_pos = np.floor(robot_pos / grid_distance) * grid_distance 
+        region_pos = np.floor(robot_pos / grid_distance) * grid_distance
+        segments = np.asarray(segments, dtype=np.float32)
+
+        if segments.size == 0:
+           return False, region_pos
+
+        if segments.ndim == 2 and segments.shape[1] == 4:
+           segments = segments.reshape(-1, 2, 2)
+
         segment_mids = np.mean(segments, axis=1) 
         neibour_counter = 0 
 
@@ -247,7 +255,7 @@ def GetState(robot_pos, walls, VarNumberOfRayCasts):
 
 def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARWeightInitType, VARtargetMaxTurn, agnt): 
     past = 0 
-    x = 0 
+    x = 51 
     not_past = 0 
     steps = 0 
     sucess_rate = 1.0 
@@ -275,8 +283,8 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
     optimizer = torch.optim.Adam(ppo_parameters, lr=1e-4) 
     w_optimizer = torch.optim.Adam([network.log_w_turn], lr=1e-3)
     
-    dashboard = Dashboard() 
-    dashboard.start() 
+    #dashboard = Dashboard() 
+    #dashboard.start() 
 
     network.InitializeWeights(VARWeightInitType) 
 
@@ -323,7 +331,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
 
             # Update robot detais
             angle, step_size = math.tanh(Action[0]) * math.pi, math.tanh(Action[1]) * 5.0  
-            new_pos = robot_pos + step_size * np.array([np.cos(angle), np.sin(angle)]) 
+            new_pos = np.floor(robot_pos + step_size * np.array([np.cos(angle), np.sin(angle)])) 
             new_angle = angle 
 
             # append action to the robot's path
@@ -349,7 +357,11 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
 
             # Store transitiion
             network.store_transition(State, Action, Reward, log_prob, done, value, buffer_step)
-            dashboard.send(maze_np.tolist(), [[new_pos[0], new_pos[1], new_angle]]) 
+
+            #dashboard.send(
+               #maze_np.tolist(),
+               #[float(new_pos[0]), float(new_pos[1]), float(new_angle)]
+             #) 
 
             buffer_step += 1
             steps += 1 
@@ -362,7 +374,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                 last_maze_solved = maze_solved
                 last_energy_used = network.EnergyUsed
                 last_regions_explored = len(RegionsExplored)
-                last_accuracy = network.GetRobotAccuracy(np.asarray(robot_path), np.asarray(A_star_path))
+                last_accuracy = network.GetRobotAccuracy(np.asarray(A_star_path), np.asarray(robot_path))
                 last_pixel_grid = pixel_grid
 
                 if maze_solved: 
@@ -394,7 +406,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             
         if episode_length > 0:
             Episode_Payload = [episode_count, episode_reward, episode_length, 1 if maze_solved else 0, sucess_rate, network.EnergyUsed, len(RegionsExplored)]
-            ACCURACY = network.GetRobotAccuracy(np.asarray(robot_path), np.asarray(A_star_path))
+            ACCURACY = network.GetRobotAccuracy(np.asarray(A_star_path), np.asarray(robot_path))
             LoggedPixelGrid = pixel_grid
         else:
             Episode_Payload = [episode_count, last_episode_reward, last_episode_length, 1 if last_maze_solved else 0, sucess_rate, last_energy_used, last_regions_explored]

@@ -22,24 +22,50 @@ def generate_maze(grid_distance, maze_size):
         pass
         
     grid = m.grid
-    start = tuple(m.start) if m.start is not None and len(m.start) == 2 else (1, 1)
-    end = tuple(m.end) if m.end is not None and len(m.end) == 2 else (grid.shape[0] - 2, grid.shape[1] - 2)
+
+
+    start_mean = tuple(m.start) if m.start is not None and len(m.start) == 2 else (1, 1)
+    end_mean = tuple(m.end) if m.end is not None and len(m.end) == 2 else (grid.shape[0] - 2, grid.shape[1] - 2)
+    
 
     if grid_distance > 1:
         grid = np.repeat(np.repeat(grid, grid_distance, axis=0), grid_distance, axis=1)
-        start = (start[0] * grid_distance, start[1] * grid_distance)
-        end = (end[0] * grid_distance, end[1] * grid_distance)
+        start_mean = (start_mean[0] * grid_distance, start_mean[1] * grid_distance)
+        end_mean = (end_mean[0] * grid_distance, end_mean[1] * grid_distance)
     
     if grid.shape[0] < maze_size:
         pad_h = maze_size - grid.shape[0]
         pad_w = maze_size - grid.shape[1]
         grid = np.pad(grid, ((0, pad_h), (0, pad_w)), mode='constant', constant_values=1)
-        
-    return grid, start, end
 
+    x = np.arange(maze_size)
+    y = np.arange(maze_size)
+    X, Y = np.meshgrid(x, y)
+
+    # pick start and end from a probability distribution
+    Start_Probabilities = np.exp(-((X - start_mean[0])**2 + (Y - start_mean[1])**2) / (2 * (maze_size / 20)**2))
+    End_Probabilities = np.exp(-((X - end_mean[0])**2 + (Y - end_mean[1])**2) / (2 * (maze_size / 20)**2))
+
+    # Make sure start and end don't fall on a wall
+    Start_Probabilities *= 1 - np.array(grid)
+    End_Probabilities *= 1 - np.array(grid)
+    
+    # normalize to make all probabilities add to 1
+    Start_Probabilities /= sum(Start_Probabilities)
+    End_Probabilities /= sum(End_Probabilities)
+
+    End_Probabilities = End_Probabilities.flatten()
+
+    # sample a start and end point
+    start_indices = np.arange(Start_Probabilities.size())
+    end_indices = np.arange(End_Probabilities.size())
+    start = np.unravel_index(np.random.choice(start_indices, p=Start_Probabilities))
+    end = np.unravel_index(np.random.choice(end_indices, p=End_Probabilities))
+    
+    return grid, start.tolist(), end.tolist()
 
 def get_new_training_example(training_steps, k=5.89, sd=20):
-    # Extract scalar float values if PyTorch Parameters are passed
+
     if isinstance(k, torch.Tensor):
         k = k.item()
     if isinstance(sd, torch.Tensor):
@@ -53,7 +79,8 @@ def get_new_training_example(training_steps, k=5.89, sd=20):
     
     # generate grid_distance (again based on a prob distribution)
     grid_distances = [i for i in range(1, maze_size // 3 + 1) if maze_size % i == 0]
-    
+
+    # Piecewise distribution function
     if not grid_distances:
         grid_distance = 1  
     else:
@@ -71,7 +98,8 @@ def get_new_training_example(training_steps, k=5.89, sd=20):
             
         else:  
             weights = np.ones(n) 
-        
+
+        # sample from the chosen probabilities
         probabilities = weights / np.sum(weights)
         chosen_distance = np.random.choice(grid_distances, p=probabilities)
         grid_distance = int(chosen_distance)
@@ -89,7 +117,7 @@ def get_new_training_example(training_steps, k=5.89, sd=20):
 
        value = torch.multinomial(end_point_distribution.view(-1), num_samples=1).item()
 
-       start_point = (0.0, 0.0)
+       start_point = (1.0, 1.0)
        end_point = (float(value % maze_size), float(value // maze_size))
        walls = []
        pixel_grid = np.zeros((maze_size, maze_size), dtype=np.int32)
