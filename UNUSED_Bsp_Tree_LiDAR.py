@@ -2,8 +2,6 @@ import numpy as np
 import heapq
 import time
 
-start_time = time.perf_counter()
-
 vertices = [[200,300], [400,500],[500,300]]
 edges = [[0,1],[1,2],[0,2]]
 
@@ -233,6 +231,7 @@ tree = Tree()
 tree_splitter = tree.choose_splitter(p0, p1, segment_vec, normal_vec)                
 bsp = tree.create_bsp_tree(p0, p1, segment_vec, normal_vec, tree_splitter)
 
+Start_time = time.perf_counter()
 distances = []
 
 for i in range(8):
@@ -242,7 +241,7 @@ for i in range(8):
 
 end_time = time.perf_counter()
 
-execution_time = end_time - start_time
+execution_time = end_time - Start_time
 print(f"Execution time: {execution_time:.6f} seconds")
 print(distances)
 

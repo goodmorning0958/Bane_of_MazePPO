@@ -11,10 +11,11 @@ from scipy.spatial.distance import euclidean
 
 from training_example_generator import get_new_training_example 
 from agent_viewer import Dashboard 
-from simulated_LiDAR import LiDAR 
+from UNUSED_Bsp_Tree_LiDAR import tree 
 from A_star_search import Normal_A_star_search
+from Bane_of_mazePPO.RunIntoWall import RunIntoWall
 
-raycaster_env = LiDAR() 
+raycaster_env = tree()
 
 class ActorCritic(nn.Module): 
     def __init__(self, h1, h2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, inputs, action_dim=2): 
@@ -127,7 +128,6 @@ class ActorCritic(nn.Module):
     @torch.no_grad() 
     def InDeadEnd(self, grid_distance, robot_pos, segments): 
         region_pos = np.floor(robot_pos / grid_distance) * grid_distance
-        segments = np.asarray(segments, dtype=np.float32)
 
         if segments.size == 0:
            return False, region_pos
@@ -168,13 +168,6 @@ class ActorCritic(nn.Module):
 
         return (neibour_counter >= 3), region_pos 
     
-    @torch.no_grad() 
-    def RunnIntoWall(self, walls, new_pos, robot_pos): 
-        dx = new_pos[0] - robot_pos[0] 
-        dy = new_pos[1] - robot_pos[1] 
-        t_distance = raycaster_env.CastRay(robot_pos, walls, dx, dy) 
-        return t_distance <= 1.0 
-        
     def reward(self, run_into_wall, in_dead_end, distance_finish, region_unexplored, robot_pos, new_pos, step_size, sucess_rate, robot_angle, new_angle): 
         Times = {32: 0.0013145, 16: 0.0005158, 8: 0.0003281, 4: 0.0002455} 
         time_cost = Times.get(self.VARNumberOfRayCasts, 0.001) 
@@ -245,13 +238,15 @@ class ActorCritic(nn.Module):
         return dtw_distance / len(alignment_path)
 
 @torch.no_grad() 
-def GetState(robot_pos, walls, VarNumberOfRayCasts):   
+def GetState(robot_pos, VarNumberOfRayCasts, bsp):   
     distances = [] 
     angle_step = (2 * math.pi) / VarNumberOfRayCasts 
-    for dir_ in range(VarNumberOfRayCasts):
-        distance = raycaster_env.CastRay(np.asarray(robot_pos), walls, math.cos(dir_ * angle_step), math.sin(dir_ * angle_step))
-        distances.append(distance if distance != float("inf") else 100) 
-    return distances 
+    for i in range(8):
+        facing_vec = np.array([np.cos(np.radians(angle_step*i)), np.sin(np.radians(angle_step*i))])
+        distance = tree.traverse_tree(bsp, robot_pos, facing_vec).item()
+        distances.append(distance) 
+
+    return distances
 
 def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARWeightInitType, VARtargetMaxTurn, agnt): 
     past = 0 
@@ -293,9 +288,22 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         robot_pos = np.array(start_point, dtype=np.float32) 
         end_point = np.array(end_point, dtype=np.float32) 
         walls_np = np.array(walls) 
-        maze_np = np.array(pixel_grid) 
-        robot_angle = 0.0 
+        maze_np = np.array(pixel_grid)
+        robot_angle = 0.0
 
+        # tree
+        p0 = walls_np[:, 0]
+        p1 = walls_np[:, 1]
+        dist_vec = p1 - p0
+        segment_vec = p0 + 0.5 * dist_vec
+        norm_val = np.linalg.norm(dist_vec, axis=1, keepdims=True)
+        normal_vec = np.column_stack((-dist_vec[:, 1], dist_vec[:, 0])) / norm_val
+
+        # Init Bsp tree
+        tree_splitter = tree.choose_splitter(p0, p1, segment_vec, normal_vec)
+        BSP = tree.create_bsp_tree(p0, p1, segment_vec, normal_vec, tree_splitter)
+
+        # A*
         A_star_path = Normal_A_star_search(np.array(pixel_grid), list(start_point), list(end_point))
         total_turn_delta = 0.0
 
@@ -320,7 +328,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         for step in range(network.MaxSteps): 
             print(step)
             # Get state (2D LiDAR) 
-            State = GetState(robot_pos, walls, VARNumberOfRayCasts)   
+            State = GetState(robot_pos, VARNumberOfRayCasts, BSP)
             State.append(float(np.linalg.norm(end_point - robot_pos))) 
             State.append(float(maze_size))
         
@@ -341,7 +349,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             total_turn_delta += angle_diff_step
 
             # Get state info
-            run_into_wall = network.RunnIntoWall(walls, new_pos, robot_pos) 
+            run_into_wall = RunIntoWall(robot_pos, walls, new_pos[0] - robot_pos[0], new_pos[1] - robot_pos[1]) 
             in_dead_end, region_pos = network.InDeadEnd(grid_distance, new_pos, walls_np) 
         
             region_tuple = tuple(region_pos.tolist()) 

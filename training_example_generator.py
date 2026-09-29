@@ -23,11 +23,9 @@ def generate_maze(grid_distance, maze_size):
         
     grid = m.grid
 
-
     start_mean = tuple(m.start) if m.start is not None and len(m.start) == 2 else (1, 1)
     end_mean = tuple(m.end) if m.end is not None and len(m.end) == 2 else (grid.shape[0] - 2, grid.shape[1] - 2)
     
-
     if grid_distance > 1:
         grid = np.repeat(np.repeat(grid, grid_distance, axis=0), grid_distance, axis=1)
         start_mean = (start_mean[0] * grid_distance, start_mean[1] * grid_distance)
@@ -51,16 +49,17 @@ def generate_maze(grid_distance, maze_size):
     End_Probabilities *= 1 - np.array(grid)
     
     # normalize to make all probabilities add to 1
-    Start_Probabilities /= sum(Start_Probabilities)
-    End_Probabilities /= sum(End_Probabilities)
+    Start_Probabilities /= np.sum(Start_Probabilities)
+    End_Probabilities /= np.sum(End_Probabilities)
 
+    Start_Probabilities = Start_Probabilities.flatten()
     End_Probabilities = End_Probabilities.flatten()
 
     # sample a start and end point
-    start_indices = np.arange(Start_Probabilities.size())
-    end_indices = np.arange(End_Probabilities.size())
-    start = np.unravel_index(np.random.choice(start_indices, p=Start_Probabilities))
-    end = np.unravel_index(np.random.choice(end_indices, p=End_Probabilities))
+    start_indices = np.arange(Start_Probabilities.size)
+    end_indices = np.arange(End_Probabilities.size)
+    start = np.unravel_index(np.random.choice(start_indices, p=Start_Probabilities), grid.shape)
+    end = np.unravel_index(np.random.choice(end_indices, p=End_Probabilities), grid.shape)
     
     return grid, start.tolist(), end.tolist()
 
@@ -106,23 +105,46 @@ def get_new_training_example(training_steps, k=5.89, sd=20):
 
     # We can start by giving the robot empty mazes to adapt/learn straight-line best path approaches
     if training_steps <= 50:
-       grid_x, grid_y = torch.meshgrid(torch.arange(maze_size), torch.arange(maze_size), indexing='ij')
+        x = np.arange(maze_size)
+        y = np.arange(maze_size)
+        X, Y = np.meshgrid(x, y)
 
-       Dist1 = (maze_size - 1) - grid_x
-       Dist2 = (maze_size - 1) - grid_y
-       DistEdge = torch.minimum(Dist1, Dist2)
-            
-       end_point_distribution = torch.exp(-(DistEdge.float() ** 2) / (2 * sd ** 2))
-       end_point_distribution = F.softmax(end_point_distribution.view(-1), dim=-1).view(maze_size, maze_size)
+        grid = np.zeros((maze_size, maze_size))
+        grid[0] = 1
+        grid[maze_size - 1] = 1
+        grid[:, 0] = 1
+        grid[:, maze_size - 1] = 1
 
-       value = torch.multinomial(end_point_distribution.view(-1), num_samples=1).item()
+        start_mean = np.array([1, 1])
+        end_mean = np.array([maze_size - 2, maze_size - 2])
+        sigma = max(2.0, maze_size / 20.0)
 
-       start_point = (1.0, 1.0)
-       end_point = (float(value % maze_size), float(value // maze_size))
-       walls = []
-       pixel_grid = np.zeros((maze_size, maze_size), dtype=np.int32)
+        # pick start and end from a probability distribution
+        Start_Probabilities = np.exp(-((X - start_mean[0])**2 + (Y - start_mean[1])**2) / (2 * (sigma)**2))
+        End_Probabilities = np.exp(-((X - end_mean[0])**2 + (Y - end_mean[1])**2) / (2 * sigma**2))
 
-       return start_point, end_point, maze_size, grid_distance, walls, pixel_grid
+        # Make sure start and end don't fall on a wall
+        Start_Probabilities *= 1 - np.array(grid)
+        End_Probabilities *= 1 - np.array(grid)
+        
+        # normalize to make all probabilities add to 1
+        Start_Probabilities /= np.sum(Start_Probabilities)
+        End_Probabilities /= np.sum(End_Probabilities)
+
+        Start_Probabilities = Start_Probabilities.flatten()
+        End_Probabilities = End_Probabilities.flatten()
+
+        # sample a start and end point
+        start_indices = np.arange(Start_Probabilities.size)
+        end_indices = np.arange(End_Probabilities.size)
+        start = np.unravel_index(np.random.choice(start_indices, p=Start_Probabilities), grid.shape)
+        end = np.unravel_index(np.random.choice(end_indices, p=End_Probabilities), grid.shape)
+        
+        start_point = (start[0], start[1])
+        end_point = (end[0], end[1])
+        walls = [[[0, 0], [maze_size - 1, 0]], [[maze_size - 1, 0], [maze_size - 1, maze_size - 1]], [[maze_size - 1, maze_size - 1], [0, maze_size - 1]], [[0, maze_size - 1], [0,0]]]
+
+        return start_point, end_point, maze_size, grid_distance, walls, grid
     
     M = generate_maze(grid_distance, maze_size)
 
