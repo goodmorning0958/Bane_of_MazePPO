@@ -2,43 +2,13 @@ import numpy as np
 import heapq
 import time
 
-vertices = [[200,300], [400,500],[500,300]]
-edges = [[0,1],[1,2],[0,2]]
-
-V = np.asarray(vertices, dtype=np.int32)
-E = np.asarray(edges, dtype=np.int32)
-
-robot_pos_x = 366 
-robot_pos_y = 366
-
-p0 = V[E[:, 0]]  #Defined as a 2D matrix.
-p1 = V[E[:, 1]]
-
-p0_0 = p0[0] 
-p1_0 = p1[0]
-
-u = 0.5  
-dist_vec = p1 - p0  
-
-norm_val = np.linalg.norm(dist_vec, axis=1, keepdims=True)
-
-normal_vec = np.column_stack((-dist_vec[:, 1], dist_vec[:, 0])) / norm_val
-segment_vec = p0 + u * dist_vec
-
-
-robot_pos = np.array([robot_pos_x, robot_pos_y]) #robot
-
-
 class Tree:
-    
     def choose_splitter(self, p0, p1, segment_vec, normal_vec):
-            
-            w_1 = 1  #Idk what to set these to.
+            w_1 = 1  
             w_2 = 8
             heap = []
 
         # choose splitter loop
-
             for cand_idx, (cand_start, cand_end, cand_seg, cand_norm) in enumerate(zip(p0, p1, segment_vec, normal_vec)):
                 
                 front_count = 0
@@ -62,8 +32,6 @@ class Tree:
                     else:
                         front_count += 1
         
-                
-        
                 splitter_score = (w_1*abs(front_count - back_count) + (w_2*split_count))
                 heapq.heappush(heap, (splitter_score, cand_idx))
                     
@@ -71,7 +39,6 @@ class Tree:
             
             return splitter_ #chosen splitter
             
-    
     def create_bsp_tree(self, p0, p1, segment_vec, normal_vec, splitter_idx):
 
         tree_front_count = []
@@ -153,8 +120,6 @@ class Tree:
             
         return node 
 
-
-
     def find_distance_to_node(self, node, robot_pos, facing_vec):
         splitter_norm = node['splitter_normal']
         splitter_point = node['splitter_point']
@@ -173,8 +138,6 @@ class Tree:
 
         for segment in node['coplanar']:
             segment_start, segment_end = segment[1], segment[2]
-            
-            
             p = robot_pos
             r = facing_vec
             a = segment_start
@@ -195,8 +158,6 @@ class Tree:
 
         return np.array([best_d, position], dtype=object)
         
-           
-
     def traverse_tree(self, current_node, robot_pos, facing_vec):
 
         if current_node is None:
@@ -225,26 +186,6 @@ class Tree:
 
         return self.traverse_tree(second_child, robot_pos, facing_vec)
         
-        
-
-tree = Tree()
-tree_splitter = tree.choose_splitter(p0, p1, segment_vec, normal_vec)                
-bsp = tree.create_bsp_tree(p0, p1, segment_vec, normal_vec, tree_splitter)
-
-Start_time = time.perf_counter()
-distances = []
-
-for i in range(8):
-    facing_vec = np.array([np.cos(np.radians(45*i)), np.sin(np.radians(45*i))])
-    distance = tree.traverse_tree(bsp, robot_pos, facing_vec)
-    distances.append(distance)
-
-end_time = time.perf_counter()
-
-execution_time = end_time - Start_time
-print(f"Execution time: {execution_time:.6f} seconds")
-print(distances)
-
 
        
         

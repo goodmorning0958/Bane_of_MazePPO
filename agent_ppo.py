@@ -11,7 +11,7 @@ from scipy.spatial.distance import euclidean
 
 from training_example_generator import get_new_training_example 
 from agent_viewer import Dashboard 
-from UNUSED_Bsp_Tree_LiDAR import tree 
+from Bane_of_mazePPO.SImulated_BSP_LiDAR import tree 
 from A_star_search import Normal_A_star_search
 from Bane_of_mazePPO.RunIntoWall import RunIntoWall
 
