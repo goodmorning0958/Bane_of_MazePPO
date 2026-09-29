@@ -36,8 +36,8 @@ def generate_maze(grid_distance, maze_size):
         pad_w = maze_size - grid.shape[1]
         grid = np.pad(grid, ((0, pad_h), (0, pad_w)), mode='constant', constant_values=1)
 
-    x = np.arange(maze_size)
-    y = np.arange(maze_size)
+    x = np.arange(grid.shape[0])
+    y = np.arange(grid.shape[0])
     X, Y = np.meshgrid(x, y)
 
     # pick start and end from a probability distribution
@@ -61,7 +61,7 @@ def generate_maze(grid_distance, maze_size):
     start = np.unravel_index(np.random.choice(start_indices, p=Start_Probabilities), grid.shape)
     end = np.unravel_index(np.random.choice(end_indices, p=End_Probabilities), grid.shape)
     
-    return grid, start.tolist(), end.tolist()
+    return grid, list(start), list(end)
 
 def get_new_training_example(training_steps, k=5.89, sd=20):
 

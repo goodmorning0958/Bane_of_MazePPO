@@ -82,7 +82,6 @@ class ActorCritic(nn.Module):
         angle_dist = dist.Normal(mean[..., 0], stds[..., 0])
         step_dist = dist.Normal(mean[..., 1], stds[..., 1])
         return angle_dist, step_dist
-        
 
     @torch.no_grad()
     def get_action_and_value(self, state_list):
