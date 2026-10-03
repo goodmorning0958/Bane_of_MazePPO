@@ -14,6 +14,7 @@ from agent_viewer import Dashboard
 from Bane_of_mazePPO.SImulated_BSP_LiDAR import tree 
 from A_star_search import Normal_A_star_search
 from Bane_of_mazePPO.RunIntoWall import RunIntoWall
+from PPO_action_converter import ConvertRobotAction
 
 raycaster_env = tree()
 
@@ -167,15 +168,16 @@ class ActorCritic(nn.Module):
 
         return (neibour_counter >= 3), region_pos 
     
-    def reward(self, run_into_wall, in_dead_end, distance_finish, region_unexplored, robot_pos, new_pos, step_size, sucess_rate, robot_angle, new_angle): 
+    def reward(self, run_into_wall, in_dead_end, distance_finish, region_unexplored, robot_pos, new_pos, step_size, sucess_rate, angle, new_angle, maze_size, done): 
         Times = {32: 0.0013145, 16: 0.0005158, 8: 0.0003281, 4: 0.0002455} 
-        time_cost = Times.get(self.VARNumberOfRayCasts, 0.001) 
+        time_cost = Times.get(self.VARNumberOfRayCasts, 0.001)
+        _, Energy_penalty =  ConvertRobotAction([angle, step_size], done)
         
         step_size = max(abs(step_size), 1e-5) 
-        angle_diff = (new_angle - robot_angle + math.pi) % (2 * math.pi) - math.pi 
+        angle_diff = (new_angle - angle + math.pi) % (2 * math.pi) - math.pi 
         turn_penalty = self.w_turn.item() * abs(angle_diff) 
         
-        reward = - (0.01 + time_cost + turn_penalty) - ((1 - sucess_rate) / 10.0) 
+        reward = - (0.01 + time_cost + turn_penalty) - ((1 - sucess_rate) / 10.0) - 5*(step_size / maze_size) - Energy_penalty
         self.EnergyUsed += time_cost 
 
         if run_into_wall:  
@@ -287,8 +289,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         robot_pos = np.array(start_point, dtype=np.float32) 
         end_point = np.array(end_point, dtype=np.float32) 
         walls_np = np.array(walls) 
-        maze_np = np.array(pixel_grid)
-        robot_angle = 0.0
+        angle = 0.0
 
         # tree
         p0 = walls_np[:, 0]
@@ -343,8 +344,9 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
 
             # append action to the robot's path
             robot_path.append(new_pos.copy())
-            
-            angle_diff_step = abs((new_angle - robot_angle + math.pi) % (2 * math.pi) - math.pi)
+
+            # calculate angle varibles
+            angle_diff_step = abs((new_angle - angle + math.pi) % (2 * math.pi) - math.pi)
             total_turn_delta += angle_diff_step
 
             # Get state info
@@ -358,7 +360,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
 
             # Get agent reward
             distance_finish = np.linalg.norm(end_point - new_pos) 
-            Reward, done, maze_solved = network.reward(run_into_wall, in_dead_end, distance_finish, region_unexplored, robot_pos, new_pos, step_size, sucess_rate, robot_angle, new_angle) 
+            Reward, done, maze_solved = network.reward(run_into_wall, in_dead_end, distance_finish, region_unexplored, robot_pos, new_pos, step_size, sucess_rate, angle, new_angle, maze_size, done) 
             episode_reward += Reward 
             episode_length += 1
 
@@ -397,16 +399,15 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                 start_point, end_point, maze_size, grid_distance, walls, pixel_grid = get_new_training_example(x, network.k, network.sd) 
                 robot_pos = np.array(start_point, dtype=np.float32) 
                 end_point = np.array(end_point, dtype=np.float32) 
-                walls_np = np.array(walls) 
-                maze_np = np.array(pixel_grid) 
-                robot_angle = 0.0 
+                walls_np = np.array(walls)  
+                angle = 0.0 
                 maze_solved = False
                 RegionsExplored = set()
                 robot_path = [robot_pos.copy()]
                 A_star_path = Normal_A_star_search(pixel_grid.tolist())
             else: 
                 robot_pos = new_pos 
-                robot_angle = new_angle 
+                angle = new_angle 
 
             # run at low FPS
             time.sleep(1)
