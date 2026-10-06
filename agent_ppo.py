@@ -242,7 +242,7 @@ class ActorCritic(nn.Module):
 def GetState(robot_pos, VarNumberOfRayCasts, bsp):   
     distances = [] 
     angle_step = (2 * math.pi) / VarNumberOfRayCasts 
-    for i in range(8):
+    for i in range(VarNumberOfRayCasts):
         facing_vec = np.array([np.cos(np.radians(angle_step*i)), np.sin(np.radians(angle_step*i))])
         distance = tree.traverse_tree(bsp, robot_pos, facing_vec).item()
         distances.append(distance) 
@@ -284,7 +284,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
 
     network.InitializeWeights(VARWeightInitType) 
 
-    while True: 
+    while steps < 1: 
         start_point, end_point, maze_size, grid_distance, walls, pixel_grid = get_new_training_example(x, network.k, network.sd) 
         robot_pos = np.array(start_point, dtype=np.float32) 
         end_point = np.array(end_point, dtype=np.float32) 
@@ -324,8 +324,9 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         last_pixel_grid = pixel_grid
 
         buffer_step = 0
-        
-        for step in range(network.MaxSteps): 
+        A_star_path
+        for step in range(network.MaxSteps):
+            done = False 
             print(step)
             # Get state (2D LiDAR) 
             State = GetState(robot_pos, VARNumberOfRayCasts, BSP)
@@ -337,16 +338,17 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             sum_action_directions += Action[0] 
             sum_action_steps_sizes += Action[1] 
 
-            # Update robot detais
-            angle, step_size = math.tanh(Action[0]) * math.pi, math.tanh(Action[1]) * 5.0  
-            new_pos = np.floor(robot_pos + step_size * np.array([np.cos(angle), np.sin(angle)])) 
-            new_angle = angle 
+            # Update robot details
+            old_angle = angle
+            new_angle = math.tanh(Action[0]) * math.pi
+            step_size = math.tanh(Action[1]) * 5.0
+            new_pos = np.floor(robot_pos + step_size * np.array([np.cos(new_angle), np.sin(new_angle)]))
 
             # append action to the robot's path
             robot_path.append(new_pos.copy())
 
-            # calculate angle varibles
-            angle_diff_step = abs((new_angle - angle + math.pi) % (2 * math.pi) - math.pi)
+            # calculate angle variables
+            angle_diff_step = abs((new_angle - old_angle + math.pi) % (2 * math.pi) - math.pi)
             total_turn_delta += angle_diff_step
 
             # Get state info
@@ -396,15 +398,27 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                 episode_reward = 0
                 episode_length = 0
 
-                start_point, end_point, maze_size, grid_distance, walls, pixel_grid = get_new_training_example(x, network.k, network.sd) 
-                robot_pos = np.array(start_point, dtype=np.float32) 
-                end_point = np.array(end_point, dtype=np.float32) 
-                walls_np = np.array(walls)  
-                angle = 0.0 
+                start_point, end_point, maze_size, grid_distance, walls, pixel_grid = get_new_training_example(x, network.k, network.sd)
+                robot_pos = np.array(start_point, dtype=np.float32)
+                end_point = np.array(end_point, dtype=np.float32)
+                walls_np = np.array(walls)
+                angle = 0.0
                 maze_solved = False
                 RegionsExplored = set()
                 robot_path = [robot_pos.copy()]
-                A_star_path = Normal_A_star_search(pixel_grid.tolist())
+
+                # Rebuild BSP tree for the new maze
+                p0 = walls_np[:, 0]
+                p1 = walls_np[:, 1]
+                dist_vec = p1 - p0
+                segment_vec = p0 + 0.5 * dist_vec
+                norm_val = np.linalg.norm(dist_vec, axis=1, keepdims=True)
+                normal_vec = np.column_stack((-dist_vec[:, 1], dist_vec[:, 0])) / norm_val
+
+                tree_splitter = tree.choose_splitter(p0, p1, segment_vec, normal_vec)
+                BSP = tree.create_bsp_tree(p0, p1, segment_vec, normal_vec, tree_splitter)
+
+                A_star_path = Normal_A_star_search(np.array(pixel_grid), list(start_point), list(end_point))
             else: 
                 robot_pos = new_pos 
                 angle = new_angle 
@@ -448,7 +462,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             next_value = torch.tensor(0.0, dtype=torch.float32)
         else:
             with torch.no_grad():
-                FinalState = GetState(robot_pos, walls, VARNumberOfRayCasts)
+                FinalState = GetState(robot_pos, VARNumberOfRayCasts, BSP)
                 FinalState.append(float(np.linalg.norm(end_point - robot_pos)))
                 FinalState.append(float(maze_size))
                 FinalStateTensor = torch.FloatTensor(FinalState)
@@ -497,9 +511,9 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                 CRITIC_LOSS = F.mse_loss(b_value, b_returns) 
                 TOTAL_LOSS = ACTOR_LOSS + network.BerryGoodKoreanDataHacker * CRITIC_LOSS - network.KoreanMumSpecial * entropy 
 
-                torch.nn.utils.clip_grad_norm_(network.parameters(), max_norm=0.5)
                 optimizer.zero_grad() 
                 TOTAL_LOSS.backward() 
+                torch.nn.utils.clip_grad_norm_(network.parameters(), max_norm=0.5)
                 optimizer.step() 
 
                 Training_Payload = [
