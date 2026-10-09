@@ -8,7 +8,6 @@ import torch.nn.functional as F
 import torch.distributions as dist
 from fastdtw import fastdtw
 from scipy.spatial.distance import euclidean
-
 from training_example_generator import get_new_training_example 
 from agent_viewer import Dashboard 
 from SImulated_BSP_LiDAR import tree 
@@ -19,7 +18,7 @@ from PPO_action_converter import ConvertRobotAction
 raycaster_env = tree()
 
 class ActorCritic(nn.Module): 
-    def __init__(self, h1, h2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, inputs, action_dim=2): 
+    def __init__(self, h1, h2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, VARFOV, inputs, action_dim=2): 
         super().__init__() 
         self.MaxSteps = 50 
         self.inputs = inputs
@@ -42,11 +41,13 @@ class ActorCritic(nn.Module):
         self.val_out = nn.Linear(h2, 1) 
 
         self.k = nn.Parameter(torch.tensor(5.89)) 
-        self.sd = nn.Parameter(torch.tensor(20.0)) 
+        self.sd = nn.Parameter(torch.tensor(20.0))
+        self.RayOffset = nn.parameter(torch.tensor(0.1))
         
         # Lagrangian constraints for Turn Energy
         self.log_w_turn = nn.Parameter(torch.tensor(math.log(0.05)))  
         self.target_max_turn = VARtargetMaxTurn
+        self.FOV = VARFOV if VARFOV is not None else nn.Parameter(torch.tensor(math.pi / 2))
 
     @property
     def w_turn(self):
@@ -86,7 +87,7 @@ class ActorCritic(nn.Module):
 
     @torch.no_grad()
     def get_action_and_value(self, state_list):
-        state_tensor = torch.FloatTensor(state_list)
+        state_tensor = torch.from_numpy(state_list).float().to('cuda', non_blocking=True)
         mean, stds, value = self.forward(state_tensor)
         angle_dist, step_dist = self.get_action_distribution(mean, stds)
 
@@ -152,7 +153,7 @@ class ActorCritic(nn.Module):
             for p in [seg_p1, seg_p2]: 
                 if segment_counted: 
                     break 
-                
+
                 if np.allclose(p, corners[0]):  
                     if (segment_mid[0] - corners[0][0] > 0) or (segment_mid[1] - corners[0][1] > 0): 
                         neibour_counter += 1; segment_counted = True; continue 
@@ -239,13 +240,15 @@ class ActorCritic(nn.Module):
         return dtw_distance / len(alignment_path)
 
 @torch.no_grad() 
-def GetState(robot_pos, VarNumberOfRayCasts, bsp):   
+def GetState(robot_pos, VarNumberOfRayCasts, bsp, Rayangle, VARFOV, angle):   
     distances = [] 
     angle_step = (2 * math.pi) / VarNumberOfRayCasts 
     for i in range(VarNumberOfRayCasts):
-        facing_vec = np.array([np.cos(np.radians(angle_step*i)), np.sin(np.radians(angle_step*i))])
-        distance = tree.traverse_tree(bsp, robot_pos, facing_vec).item()
-        distances.append(distance) 
+        ray_angle = np.radians(angle_step*i + Rayangle)
+        if angle - VARFOV / 2 <= ray_angle <= angle + VARFOV / 2:
+           ray_vec = np.array([np.cos(ray_angle), np.sin(ray_angle)])
+           distance = tree.traverse_tree(bsp, robot_pos, ray_vec).item()
+           distances.append(distance) 
 
     return distances
 
@@ -270,7 +273,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         VARtargetMaxTurn=VARtargetMaxTurn, 
         inputs=NNinputs
     )
-
+    network = torch.compile(network)
     ppo_parameters = [
     parameter for name, parameter in network.named_parameters()
     if name != "log_w_turn"
@@ -327,9 +330,9 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         A_star_path
         for step in range(network.MaxSteps):
             done = False 
-            print(step)
+            print((step), end=" ")
             # Get state (2D LiDAR) 
-            State = GetState(robot_pos, VARNumberOfRayCasts, BSP)
+            State = GetState(robot_pos, VARNumberOfRayCasts, BSP, network.RayOffset)
             State.append(float(np.linalg.norm(end_point - robot_pos))) 
             State.append(float(maze_size))
         
