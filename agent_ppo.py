@@ -42,12 +42,13 @@ class ActorCritic(nn.Module):
 
         self.k = nn.Parameter(torch.tensor(5.89)) 
         self.sd = nn.Parameter(torch.tensor(20.0))
-        self.RayOffset = nn.parameter(torch.tensor(0.1))
+        self.RayOffset = nn.Parameter(torch.tensor(0.1, dtype=torch.float32))
         
-        # Lagrangian constraints for Turn Energy
+        # Constants
         self.log_w_turn = nn.Parameter(torch.tensor(math.log(0.05)))  
         self.target_max_turn = VARtargetMaxTurn
         self.FOV = VARFOV if VARFOV is not None else nn.Parameter(torch.tensor(math.pi / 2))
+        self.time_cost = 0
 
     @property
     def w_turn(self):
@@ -87,7 +88,7 @@ class ActorCritic(nn.Module):
 
     @torch.no_grad()
     def get_action_and_value(self, state_list):
-        state_tensor = torch.from_numpy(state_list).float().to('cuda', non_blocking=True)
+        state_tensor = torch.as_tensor(state_list, dtype=torch.float32)
         mean, stds, value = self.forward(state_tensor)
         angle_dist, step_dist = self.get_action_distribution(mean, stds)
 
@@ -97,7 +98,7 @@ class ActorCritic(nn.Module):
         action = torch.stack([angle, step_size], dim=-1)
         log_prob = angle_dist.log_prob(angle) + step_dist.log_prob(step_size)
 
-        return action.numpy(), log_prob, value, mean, stds
+        return action.cpu().numpy(), log_prob.cpu(), value.cpu(), mean, stds
 
     def evaluate_actions(self, states, actions):
         mean, stds, value = self.forward(states)
@@ -168,19 +169,21 @@ class ActorCritic(nn.Module):
                         neibour_counter += 1; segment_counted = True; continue 
 
         return (neibour_counter >= 3), region_pos 
-    
-    def reward(self, run_into_wall, in_dead_end, distance_finish, region_unexplored, robot_pos, new_pos, step_size, sucess_rate, angle, new_angle, maze_size, done): 
-        Times = {32: 0.0013145, 16: 0.0005158, 8: 0.0003281, 4: 0.0002455} 
-        time_cost = Times.get(self.VARNumberOfRayCasts, 0.001)
-        _, Energy_penalty =  ConvertRobotAction([angle, step_size], done)
-        
-        step_size = max(abs(step_size), 1e-5) 
-        angle_diff = (new_angle - angle + math.pi) % (2 * math.pi) - math.pi 
-        turn_penalty = self.w_turn.item() * abs(angle_diff) 
-        
-        reward = - (0.01 + time_cost + turn_penalty) - ((1 - sucess_rate) / 10.0) - 5*(step_size / maze_size) - Energy_penalty
-        self.EnergyUsed += time_cost 
 
+    def EnergyCost(self, angle, step_size, new_angle, done, c1, c2, c3):
+        _, Energy_penalty = ConvertRobotAction([angle, step_size], done)
+        step_size = max(abs(step_size), 1e-5)
+        angle_diff = (new_angle - angle + math.pi) % (2 * math.pi) - math.pi
+        turn_penalty = self.w_turn.item() * abs(angle_diff)
+
+        Total_penalty = (c1 * Energy_penalty) + (c2 * turn_penalty) + (c3 * self.time_cost)
+        return Total_penalty
+
+    def reward(self, run_into_wall, in_dead_end, distance_finish, region_unexplored, robot_pos, new_pos, step_size, sucess_rate, angle, new_angle, maze_size, done): 
+        Total_penalty_energy = self.EnergyCost(angle, step_size, new_angle, done, 0.1, 0.2, 0.3)
+        self.EnergyUsed += Total_penalty_energy
+        reward = - ((1 - sucess_rate) / 10.0) - 5*(step_size / maze_size) - Total_penalty_energy
+        
         if run_into_wall:  
             return reward - 10.0, True, False 
 
@@ -239,20 +242,26 @@ class ActorCritic(nn.Module):
         dtw_distance, alignment_path = fastdtw(A_star_path, Robot_path, dist=euclidean)
         return dtw_distance / len(alignment_path)
 
-@torch.no_grad() 
-def GetState(robot_pos, VarNumberOfRayCasts, bsp, Rayangle, VARFOV, angle):   
-    distances = [] 
-    angle_step = (2 * math.pi) / VarNumberOfRayCasts 
-    for i in range(VarNumberOfRayCasts):
-        ray_angle = np.radians(angle_step*i + Rayangle)
-        if angle - VARFOV / 2 <= ray_angle <= angle + VARFOV / 2:
-           ray_vec = np.array([np.cos(ray_angle), np.sin(ray_angle)])
-           distance = tree.traverse_tree(bsp, robot_pos, ray_vec).item()
-           distances.append(distance) 
+    @torch.no_grad() 
+    def GetState(self, robot_pos, VarNumberOfRayCasts, bsp, Rayangle, VARFOV, angle, VARRayDistance, maze_size):
+        Start = time.perf_counter()   
+        distances = [] 
+        angle_step = (2 * math.pi) / VarNumberOfRayCasts 
+        for i in range(VarNumberOfRayCasts):
+            ray_angle = float(angle_step*i + Rayangle)
+            if abs((ray_angle - angle + math.pi) % (2 * math.pi) - math.pi) <= VARFOV / 2:
+               ray_vec = np.array([np.cos(ray_angle), np.sin(ray_angle)], dtype=np.float32)
+            distance = tree.traverse_tree(bsp, robot_pos, ray_vec).item()
+            if VARRayDistance is None:
+               VARRayDistance = maze_size
+            if distance >= VARRayDistance:
+                distance = VARRayDistance
+            distances.append(distance) 
+        End = time.perf_counter()
+        self.time_cost = End - Start
+        return distances
 
-    return distances
-
-def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARWeightInitType, VARtargetMaxTurn, agnt): 
+def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARWeightInitType, VARtargetMaxTurn, agnt, VARFOV, VARRayDistance): 
     past = 0 
     x = 51 
     not_past = 0 
@@ -271,7 +280,9 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         VARNumberOfRayCasts=VARNumberOfRayCasts, 
         VARAllowedEnergy=VARAllowedEnergy, 
         VARtargetMaxTurn=VARtargetMaxTurn, 
+        VARFOV=VARFOV,
         inputs=NNinputs
+
     )
     network = torch.compile(network)
     ppo_parameters = [
@@ -292,7 +303,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         robot_pos = np.array(start_point, dtype=np.float32) 
         end_point = np.array(end_point, dtype=np.float32) 
         walls_np = np.array(walls) 
-        angle = 0.0
+        angle = np.float32((7*math.pi) / 4)
 
         # tree
         p0 = walls_np[:, 0]
@@ -332,7 +343,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             done = False 
             print((step), end=" ")
             # Get state (2D LiDAR) 
-            State = GetState(robot_pos, VARNumberOfRayCasts, BSP, network.RayOffset)
+            State = network.GetState(robot_pos, VARNumberOfRayCasts, BSP, network.RayOffset, network.FOV, angle, VARRayDistance, maze_size)
             State.append(float(np.linalg.norm(end_point - robot_pos))) 
             State.append(float(maze_size))
         
@@ -405,7 +416,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                 robot_pos = np.array(start_point, dtype=np.float32)
                 end_point = np.array(end_point, dtype=np.float32)
                 walls_np = np.array(walls)
-                angle = 0.0
+                angle = np.float32((7*math.pi) / 4)
                 maze_solved = False
                 RegionsExplored = set()
                 robot_path = [robot_pos.copy()]
@@ -465,7 +476,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             next_value = torch.tensor(0.0, dtype=torch.float32)
         else:
             with torch.no_grad():
-                FinalState = GetState(robot_pos, VARNumberOfRayCasts, BSP)
+                FinalState = network.GetState(robot_pos, VARNumberOfRayCasts, BSP, network.RayOffset, network.FOV, angle, VARRayDistance, maze_size)
                 FinalState.append(float(np.linalg.norm(end_point - robot_pos)))
                 FinalState.append(float(maze_size))
                 FinalStateTensor = torch.FloatTensor(FinalState)
@@ -542,10 +553,12 @@ if __name__ == "__main__":
    StartAgent(
       48,
       24,
-      4,
+      24,
       100,
-      6,
+      26,
       "orth",
       0.5,
-      0
+      0,
+      360,
+      None
    )

@@ -183,7 +183,7 @@ class Tree:
 
         if d is not None:
            return d
-
+           
         return self.traverse_tree(second_child, robot_pos, facing_vec)
         
 
