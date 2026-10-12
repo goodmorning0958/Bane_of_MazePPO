@@ -170,6 +170,7 @@ class ActorCritic(nn.Module):
 
         return (neibour_counter >= 3), region_pos 
 
+    @torch.no_grad
     def EnergyCost(self, angle, step_size, new_angle, done, c1, c2, c3):
         _, Energy_penalty = ConvertRobotAction([angle, step_size], done)
         step_size = max(abs(step_size), 1e-5)
