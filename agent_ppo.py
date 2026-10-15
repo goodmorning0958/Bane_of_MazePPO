@@ -10,12 +10,12 @@ from fastdtw import fastdtw
 from scipy.spatial.distance import euclidean
 from training_example_generator import get_new_training_example 
 from agent_viewer import Dashboard 
-from SImulated_BSP_LiDAR import tree 
+from SImulated_BSP_LiDAR import Tree 
 from A_star_search import Normal_A_star_search
 from RunIntoWall import RunIntoWall
 from PPO_action_converter import ConvertRobotAction
 
-raycaster_env = tree()
+raycaster_env = Tree()
 
 class ActorCritic(nn.Module): 
     def __init__(self, h1, h2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, VARFOV, inputs, action_dim=2): 
@@ -252,7 +252,7 @@ class ActorCritic(nn.Module):
             ray_angle = float(angle_step*i + Rayangle)
             if abs((ray_angle - angle + math.pi) % (2 * math.pi) - math.pi) <= VARFOV / 2:
                ray_vec = np.array([np.cos(ray_angle), np.sin(ray_angle)], dtype=np.float32)
-            distance = tree.traverse_tree(bsp, robot_pos, ray_vec).item()
+            distance = raycaster_env.traverse_tree(bsp, robot_pos, ray_vec).item()
             if VARRayDistance is None:
                VARRayDistance = maze_size
             if distance >= VARRayDistance:
@@ -315,8 +315,8 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         normal_vec = np.column_stack((-dist_vec[:, 1], dist_vec[:, 0])) / norm_val
 
         # Init Bsp tree
-        tree_splitter = tree.choose_splitter(p0, p1, segment_vec, normal_vec)
-        BSP = tree.create_bsp_tree(p0, p1, segment_vec, normal_vec, tree_splitter)
+        tree_splitter = raycaster_env.choose_splitter(p0, p1, segment_vec, normal_vec)
+        BSP = raycaster_env.create_bsp_tree(p0, p1, segment_vec, normal_vec, tree_splitter)
 
         # A*
         A_star_path = Normal_A_star_search(np.array(pixel_grid), list(start_point), list(end_point))
@@ -430,8 +430,8 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                 norm_val = np.linalg.norm(dist_vec, axis=1, keepdims=True)
                 normal_vec = np.column_stack((-dist_vec[:, 1], dist_vec[:, 0])) / norm_val
 
-                tree_splitter = tree.choose_splitter(p0, p1, segment_vec, normal_vec)
-                BSP = tree.create_bsp_tree(p0, p1, segment_vec, normal_vec, tree_splitter)
+                tree_splitter = raycaster_env.choose_splitter(p0, p1, segment_vec, normal_vec)
+                BSP = raycaster_env.create_bsp_tree(p0, p1, segment_vec, normal_vec, tree_splitter)
 
                 A_star_path = Normal_A_star_search(np.array(pixel_grid), list(start_point), list(end_point))
             else: 
