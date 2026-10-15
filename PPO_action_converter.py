@@ -31,7 +31,6 @@ def ConvertRobotAction(Action: list[float], done) -> list[list[int]]:
     # calculate energy penalty from velocities
     Penalty = (VLeft**2 + VRight**2) >> 14
     step_bytes = list(struct.pack('<i', int(round(step_size))))
-    Payload = [Length, HubID, CommandType, PortID, ExecutionInfo, SubCommand] + step_bytes + [VLeft, VRight, EndState, Profile]
 
     # Other packet Info
     HubID = 0x00
@@ -41,7 +40,8 @@ def ConvertRobotAction(Action: list[float], done) -> list[list[int]]:
     SubCommand = 0x08    # Output for Degrees, Synchronized
     EndState = 0x7F if done else 0x00 # Robot Path Has Been Completed
     Profile = 0x00       # No speed profile ramps
-    Length = len(Payload) + 1
+    
+    Payload = [14, HubID, CommandType, PortID, ExecutionInfo, SubCommand] + step_bytes + [VLeft, VRight, EndState, Profile]
 
     LWP3Packet.append(Payload)
 

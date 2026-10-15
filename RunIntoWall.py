@@ -1,5 +1,5 @@
 
-def CheckIntersection(self, Wall, robot_pos, dx, dy):
+def CheckIntersection(Wall, robot_pos, dx, dy):
     # get the parametric vector equations
     x1, y1 = Wall[0][0], Wall[0][1]
     x2, y2 = Wall[1][0], Wall[1][1]
@@ -21,12 +21,12 @@ def CheckIntersection(self, Wall, robot_pos, dx, dy):
     else:
         return float('inf')
 
-def RunIntoWall(self, robot_pos, walls, dx, dy):
+def RunIntoWall(robot_pos, walls, dx, dy):
     if walls is None or len(walls) == 0:
         return float('inf')
 
     for wall in walls:
-        distance = self.CheckIntersection(wall, robot_pos, dx, dy)
+        distance = CheckIntersection(wall, robot_pos, dx, dy)
         if distance <= 1:
             return True
         
