@@ -283,19 +283,19 @@ class ActorCritic(nn.Module):
     @torch.no_grad()
     def LogDataToCSV(Data1, Data2, Data3, CSVType, agnt_id):
         if CSVType == "eps":
-            with open(f"EpisodeData_{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
+            with open(f"EpisodeData_{agnt_id}.csv", mode="w", newline="", encoding="utf-8") as file:
                 csv.writer(file).writerow(Data1)
-            with open(f"RobotActions_{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
+            with open(f"RobotActions_{agnt_id}.csv", mode="w", newline="", encoding="utf-8") as file:
                 csv.writer(file).writerows(Data2)
-            with open(f"ActionData_{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
+            with open(f"ActionData_{agnt_id}.csv", mode="w", newline="", encoding="utf-8") as file:
                 csv.writer(file).writerow(Data3)
         elif CSVType == "trg":
-            with open(f"TrainingData_{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
+            with open(f"TrainingData_{agnt_id}.csv", mode="w", newline="", encoding="utf-8") as file:
                 csv.writer(file).writerow(Data1)
         else:
-            with open(f"Mazes_{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
+            with open(f"Mazes_{agnt_id}.csv", mode="w", newline="", encoding="utf-8") as file:
                 csv.writer(file).writerow([json.dumps(np.asarray(Data1).tolist())])
-            with open(f"Accuracies_{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
+            with open(f"Accuracies_{agnt_id}.csv", mode="w", newline="", encoding="utf-8") as file:
                 csv.writer(file).writerow([float(Data2)])
 
     @staticmethod
@@ -342,7 +342,6 @@ class ActorCritic(nn.Module):
 
         self.time_cost = time.perf_counter() - start_time
         return distances
-
 
 def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARWeightInitType, VARtargetMaxTurn, agnt, VARFOV, VARRayDistance):
     past = 0
