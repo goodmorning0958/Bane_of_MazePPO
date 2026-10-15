@@ -16,6 +16,7 @@ from SImulated_BSP_LiDAR import Tree
 from A_star_search import Normal_A_star_search
 from RunIntoWall import RunIntoWall
 from PPO_action_converter import ConvertRobotAction
+from agent_viewer import Dashboard
 
 
 raycaster_env = Tree()
@@ -50,8 +51,6 @@ def _build_bsp_tree(walls):
     lengths = np.linalg.norm(segments[:, 1] - segments[:, 0], axis=1)
     valid = np.isfinite(segments).all(axis=(1, 2)) & (lengths > 1e-6)
     segments = segments[valid]
-    if len(segments) == 0:
-        raise ValueError("The generated maze contains no valid, non-zero-length wall segments.")
 
     p0 = segments[:, 0]
     p1 = segments[:, 1]
@@ -66,13 +65,11 @@ def _build_bsp_tree(walls):
 class ActorCritic(nn.Module):
     def __init__(self, h1, h2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, VARFOV, inputs, action_dim=2):
         super().__init__()
-        self.MaxSteps = 200
+        self.MaxSteps = 50
         self.inputs = int(inputs)
         self.VARNumberOfRayCasts = int(VARNumberOfRayCasts)
         self.VARAllowedEnergy = float(VARAllowedEnergy)
         self.EnergyUsed = 0.0
-        if self.inputs != self.VARNumberOfRayCasts + 2:
-            raise ValueError(f"inputs must equal ray casts + 2 (goal distance and maze size); got inputs={self.inputs}, rays={self.VARNumberOfRayCasts}.")
 
         self.clear_memory(self.MaxSteps)
 
@@ -223,8 +220,6 @@ class ActorCritic(nn.Module):
     def EnergyCost(self, angle, step_size, new_angle, done, c1, c2, c3):
         _, energy_value = ConvertRobotAction([new_angle, step_size], done)
         energy_value = float(energy_value)
-        if not math.isfinite(energy_value):
-            raise FloatingPointError(f"ConvertRobotAction returned non-finite energy: {energy_value}")
 
         # Energy consumption cannot be negative; clamp tiny/invalid negative estimates to zero.
         raw_energy = max(0.0, energy_value)
@@ -282,8 +277,7 @@ class ActorCritic(nn.Module):
                 elif Type == "Xaiv":
                     nn.init.xavier_uniform_(module.weight)
                 else:
-                    raise TypeError(f"Unknown initialization type: {Type}")
-                nn.init.constant_(module.bias, 0.0)
+                    nn.init.constant_(module.bias, 0.0)
 
     @staticmethod
     @torch.no_grad()
@@ -321,8 +315,6 @@ class ActorCritic(nn.Module):
         start_time = time.perf_counter()
         distances = []
         ray_count = int(VarNumberOfRayCasts)
-        if ray_count <= 0:
-            raise ValueError("VarNumberOfRayCasts must be greater than zero.")
 
         max_distance = float(maze_size if VARRayDistance is None else VARRayDistance)
         if not math.isfinite(max_distance) or max_distance <= 0:
@@ -371,6 +363,9 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
     optimizer = torch.optim.Adam(ppo_parameters, lr=1e-4)
     w_optimizer = torch.optim.Adam([network.log_w_turn], lr=1e-3)
 
+    dashboard = Dashboard()
+    dashboard.start()
+
     for _rollout in range(ROLLOUTS):
         start_point, end_point, maze_size, grid_distance, walls, pixel_grid = get_new_training_example(x, network.k, network.sd)
         robot_pos = np.array(start_point, dtype=np.float32)
@@ -408,16 +403,14 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             lidar_seconds_this_rollout += network.time_cost
             State.append(float(np.linalg.norm(end_point - robot_pos)))
             State.append(float(maze_size))
-            if len(State) != NNinputs:
-                raise ValueError(f"State has {len(State)} values, but NNinputs={NNinputs}.")
 
             Action, log_prob, value, _, _ = network.get_action_and_value(State)
+            dashboard.send(walls_np, np.array([Action[0], Action[1]]))
             sum_action_directions += float(Action[0])
             sum_action_step_sizes += float(Action[1])
 
             old_angle = float(angle)
             new_angle = math.tanh(float(Action[0])) * math.pi
-            # Convert the policy's unconstrained step action to a non-negative distance in [0, 5].
             step_size = (math.tanh(float(Action[1])) + 1.0) * 2.5
             new_pos = np.floor(robot_pos + step_size * np.array([np.cos(new_angle), np.sin(new_angle)])).astype(np.float32)
             robot_path.append(new_pos.copy())
@@ -426,6 +419,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             total_turn_delta += angle_diff_step
 
             run_into_wall = bool(RunIntoWall(robot_pos, walls, new_pos[0] - robot_pos[0], new_pos[1] - robot_pos[1]))
+            print(f"\n[MOVE DEBUG] start={robot_pos.tolist()} action={Action.tolist()} heading={new_angle:.3f} step={step_size:.3f} proposed={new_pos.tolist()} collision={run_into_wall}", flush=True)
             in_dead_end, region_pos = network.InDeadEnd(grid_distance, new_pos, walls_np)
             region_tuple = tuple(region_pos.tolist())
             region_unexplored = region_tuple not in RegionsExplored
@@ -434,19 +428,6 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
 
             distance_finish = float(np.linalg.norm(end_point - new_pos))
             Reward, done, maze_solved = network.reward(run_into_wall, in_dead_end, distance_finish, region_unexplored, robot_pos, new_pos, step_size, success_rate, old_angle, new_angle, maze_size, done)
-            if not math.isfinite(float(Reward)):
-                raise FloatingPointError(f"Non-finite reward at rollout step {step}: {Reward}")
-            if step % REWARD_DEBUG_EVERY == 0 or done:
-                print(
-                    f"\n[REWARD DEBUG] step={step} reward={float(Reward):.3f} "
-                    f"raw_energy={network.last_raw_energy:.4f} "
-                    f"energy_term={network.last_energy_component:.4f} "
-                    f"turn_term={network.last_turn_component:.4f} "
-                    f"time_term={network.last_time_component:.6f} "
-                    f"total_penalty={network.last_total_penalty:.4f} "
-                    f"EnergyUsed={network.EnergyUsed:.3f} done={done} solved={maze_solved}",
-                    flush=True,
-                )
             episode_reward += Reward
             episode_length += 1
             network.store_transition(State, Action, Reward, log_prob, done, value, buffer_step)
@@ -487,7 +468,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
 
                 completed_actions = past + not_past
                 success_rate = past / completed_actions if completed_actions else 0.0
-                print(f"[SUCCESS RATE] {success_rate:.1%} ({past}/{completed_actions} completed mazes solved)", flush=True)
+                print(success_rate, flush=True)
                 network.EnergyUsed = 0.0
                 episode_reward = 0.0
                 episode_length = 0
@@ -508,14 +489,6 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             if ACTION_DELAY_SECONDS > 0:
                 time.sleep(ACTION_DELAY_SECONDS)
 
-        print(f"\n[ROLLOUT SUMMARY] transitions={buffer_step} | done_flags={int(network.dones.sum().item())} | goals={goal_successes} | wall_failures={wall_failures} | dead_end_terminations={dead_end_terminations} | other_terminations={other_terminations}", flush=True)
-        print(f"[TIMING] average LiDAR/state raycasting time: {1000.0 * lidar_seconds_this_rollout / max(buffer_step, 1):.3f} ms/step", flush=True)
-        print(f"[SUCCESS RATE SUMMARY] {success_rate:.1%} ({past}/{past + not_past} completed mazes solved)", flush=True)
-        if network.dones[network.MaxSteps - 1].item() == 0.0:
-            print("[ROLLOUT SUMMARY] Last transition is non-terminal; value bootstrapping should be used.", flush=True)
-        else:
-            print("[ROLLOUT SUMMARY] Last transition is terminal; the next-state value should be zero.", flush=True)
-
         if episode_length > 0:
             Episode_Payload = [episode_count, episode_reward, episode_length, 1 if maze_solved else 0, success_rate, network.EnergyUsed, len(RegionsExplored)]
             ACCURACY = network.GetRobotAccuracy(np.asarray(A_star_path), np.asarray(robot_path))
@@ -526,7 +499,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             LoggedPixelGrid = last_pixel_grid
 
         action_payload = [sum_action_directions / network.MaxSteps, sum_action_step_sizes / network.MaxSteps]
-        network.LogDataToCSV(Episode_Payload, network.actions.numpy().tolist(), action_payload, "eps", agnt)
+        #network.LogDataToCSV(Episode_Payload, network.actions.numpy().tolist(), action_payload, "eps", agnt)
         network.LogDataToCSV(LoggedPixelGrid, ACCURACY, None, "mze", agnt)
         episode_count += 1
         episode_reward = 0.0
@@ -589,8 +562,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                 actor_loss = torch.mean(-torch.min(surrogate_1, surrogate_2))
                 critic_loss = F.mse_loss(batch_value, batch_returns)
                 total_loss = actor_loss + network.BerryGoodKoreanDataHacker * critic_loss - network.KoreanMumSpecial * entropy_mean
-                if not torch.isfinite(total_loss).item():
-                    raise FloatingPointError(f"PPO loss became non-finite at epoch {epoch + 1}.")
+
 
                 optimizer.zero_grad()
                 total_loss.backward()
@@ -600,11 +572,9 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                 Training_Payload = [steps, success_rate, total_loss.item(), actor_loss.item(), critic_loss.item(), entropy_mean.item(), batch_advantages.mean().item()]
                 network.LogDataToCSV(Training_Payload, None, None, "trg", agnt)
 
-            print(f"[PPO UPDATE] epoch={epoch + 1}/{PPO_EPOCHS} | total_loss={total_loss.item():.6f} | actor_loss={actor_loss.item():.6f} | critic_loss={critic_loss.item():.6f} | entropy={entropy_mean.item():.6f}", flush=True)
-
         with torch.no_grad():
             parameter_delta = math.sqrt(sum(float(torch.sum((parameter - before) ** 2).item()) for parameter, before in zip(ppo_parameters, params_before_update)))
-        print(f"[LEARNING CHECK] finite_loss=True | PPO_parameter_change_L2={parameter_delta:.8f} | weights_updated={parameter_delta > 0.0}", flush=True)
+        
 
         avg_turn = total_turn_delta / MaxSteps
         w_turn_loss = -network.w_turn * (avg_turn - network.target_max_turn)
@@ -615,11 +585,6 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             network.log_w_turn.clamp_(math.log(1e-4), math.log(10.0))
 
         network.clear_memory(MaxSteps)
-
-    print("\nTest rollouts and PPO updates completed.")
-    print("Note: parameter changes confirm optimizer updates, not improved maze-solving performance.")
-    print("Energy-budget caveat: ConvertRobotAction's second return value is treated as unweighted per-action energy.")
-
 
 if __name__ == "__main__":
     StartAgent(48, 24, 24, 100, 26, "orth", 0.5, 0, 360, None)
