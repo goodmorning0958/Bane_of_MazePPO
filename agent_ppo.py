@@ -418,7 +418,6 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             total_turn_delta += angle_diff_step
 
             run_into_wall = bool(RunIntoWall(robot_pos, walls, new_pos[0] - robot_pos[0], new_pos[1] - robot_pos[1]))
-            print(f"\n[MOVE DEBUG] start={robot_pos.tolist()} action={Action.tolist()} heading={new_angle:.3f} step={step_size:.3f} proposed={new_pos.tolist()} collision={run_into_wall}", flush=True)
             in_dead_end, region_pos = network.InDeadEnd(grid_distance, new_pos, walls_np)
             region_tuple = tuple(region_pos.tolist())
             region_unexplored = region_tuple not in RegionsExplored
@@ -427,6 +426,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
 
             distance_finish = float(np.linalg.norm(end_point - new_pos))
             Reward, done, maze_solved = network.reward(run_into_wall, in_dead_end, distance_finish, region_unexplored, robot_pos, new_pos, step_size, success_rate, old_angle, new_angle, maze_size, done)
+            print(done, end=" ",flush=True)
             episode_reward += Reward
             episode_length += 1
             network.store_transition(State, Action, Reward, log_prob, done, value, buffer_step)
@@ -437,26 +437,13 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             success_rate = 0.0 if completed_actions == 0 else past / completed_actions
 
             if done:
-                if maze_solved:
-                    goal_successes += 1
-                    end_reason = "GOAL_REACHED"
-                elif run_into_wall:
-                    wall_failures += 1
-                    end_reason = "WALL_COLLISION"
-                elif in_dead_end:
-                    dead_end_terminations += 1
-                    end_reason = "DEAD_END"
-                else:
-                    other_terminations += 1
-                    end_reason = "OTHER_TERMINAL"
-                print(f"\n[EPISODE END] reason={end_reason} | done={done} | solved={maze_solved} | episode_steps={episode_length} | episode_reward={episode_reward:.3f}", flush=True)
-
                 last_episode_reward = episode_reward
                 last_episode_length = episode_length
                 last_maze_solved = maze_solved
                 last_energy_used = network.EnergyUsed
                 last_regions_explored = len(RegionsExplored)
                 last_accuracy = network.GetRobotAccuracy(np.asarray(A_star_path), np.asarray(robot_path))
+                print(last_accuracy, end=" ", flush=True)
                 last_pixel_grid = pixel_grid
 
                 if maze_solved:
@@ -498,7 +485,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             LoggedPixelGrid = last_pixel_grid
 
         action_payload = [sum_action_directions / network.MaxSteps, sum_action_step_sizes / network.MaxSteps]
-        #network.LogDataToCSV(Episode_Payload, network.actions.numpy().tolist(), action_payload, "eps", agnt)
+        network.LogDataToCSV(Episode_Payload, network.actions.numpy().tolist(), action_payload, "eps", agnt)
         network.LogDataToCSV(LoggedPixelGrid, ACCURACY, None, "mze", agnt)
         episode_count += 1
         episode_reward = 0.0
@@ -541,6 +528,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         returns = advantages + values
         advantages = (advantages - advantages_mean) / torch.clamp(advantages_std, min=1e-8)
 
+        # TRAINING LOOP
         PPO_EPOCHS = 4
         params_before_update = [parameter.detach().clone() for parameter in ppo_parameters]
         for epoch in range(PPO_EPOCHS):
@@ -562,7 +550,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                 critic_loss = F.mse_loss(batch_value, batch_returns)
                 total_loss = actor_loss + network.BerryGoodKoreanDataHacker * critic_loss - network.KoreanMumSpecial * entropy_mean
 
-
+                # Update weights!!
                 optimizer.zero_grad()
                 total_loss.backward()
                 torch.nn.utils.clip_grad_norm_(ppo_parameters, max_norm=0.5)
@@ -574,7 +562,6 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         with torch.no_grad():
             parameter_delta = math.sqrt(sum(float(torch.sum((parameter - before) ** 2).item()) for parameter, before in zip(ppo_parameters, params_before_update)))
         
-
         avg_turn = total_turn_delta / MaxSteps
         w_turn_loss = -network.w_turn * (avg_turn - network.target_max_turn)
         w_optimizer.zero_grad()
