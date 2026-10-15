@@ -280,17 +280,21 @@ class ActorCritic(nn.Module):
     @staticmethod
     @torch.no_grad()
     def LogDataToCSV(Data1, Data2, Data3, CSVType, agnt_id):
-        if CSVType == "eps":
+        if CSVType == "ep":
             with open(f"EpisodeData_{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
                 csv.writer(file).writerow(Data1)
+
+        elif CSVType == "act":
             with open(f"RobotActions_{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
                 csv.writer(file).writerows(Data2)
             with open(f"ActionData_{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
                 csv.writer(file).writerow(Data3)
+
         elif CSVType == "trg":
             with open(f"TrainingData_{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
                 csv.writer(file).writerow(Data1)
-        else:
+
+        elif CSVType == "mze":
             with open(f"Mazes_{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
                 csv.writer(file).writerow([json.dumps(np.asarray(Data1).tolist())])
             with open(f"Accuracies_{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
@@ -396,25 +400,30 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             done = False
             print(step, end=" ", flush=True)
 
+            # get state
             State = network.GetState(robot_pos, VARNumberOfRayCasts, BSP, network.RayOffset, network.FOV, angle, VARRayDistance, maze_size)
             lidar_seconds_this_rollout += network.time_cost
             State.append(float(np.linalg.norm(end_point - robot_pos)))
             State.append(float(maze_size))
 
+            # get action
             Action, log_prob, value, _, _ = network.get_action_and_value(State)
             dashboard.send(walls_np, np.array([Action[0], Action[1]]))
             sum_action_directions += float(Action[0])
             sum_action_step_sizes += float(Action[1])
 
+            # uptade virtual robot
             old_angle = float(angle)
             new_angle = math.tanh(float(Action[0])) * math.pi
             step_size = (math.tanh(float(Action[1])) + 1.0) * 2.5
             new_pos = np.floor(robot_pos + step_size * np.array([np.cos(new_angle), np.sin(new_angle)])).astype(np.float32)
             robot_path.append(new_pos.copy())
 
+            # angle sharpness
             angle_diff_step = abs((new_angle - old_angle + math.pi) % (2 * math.pi) - math.pi)
             total_turn_delta += angle_diff_step
 
+            # get stae info
             run_into_wall = bool(RunIntoWall(robot_pos, walls, new_pos[0] - robot_pos[0], new_pos[1] - robot_pos[1]))
             in_dead_end, region_pos = network.InDeadEnd(grid_distance, new_pos, walls_np)
             region_tuple = tuple(region_pos.tolist())
@@ -422,6 +431,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             if region_unexplored:
                 RegionsExplored.add(region_tuple)
 
+            # Get reward
             distance_finish = float(np.linalg.norm(end_point - new_pos))
             Reward, done, maze_solved = network.reward(run_into_wall, in_dead_end, distance_finish, region_unexplored, robot_pos, new_pos, step_size, success_rate, old_angle, new_angle, maze_size, done)
             print(done, end=" ",flush=True)
@@ -440,8 +450,10 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                 last_maze_solved = maze_solved
                 last_energy_used = network.EnergyUsed
                 last_regions_explored = len(RegionsExplored)
-                last_accuracy = network.GetRobotAccuracy(np.asarray(A_star_path), np.asarray(robot_path))
-                print(last_accuracy, end=" ", flush=True)
+                last_accuracy = network.GetRobotAccuracy(
+                    np.asarray(A_star_path),
+                    np.asarray(robot_path)
+                )
                 last_pixel_grid = pixel_grid
 
                 if maze_solved:
@@ -449,23 +461,57 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                     x += 1
                 else:
                     not_past += 1
-
+               
                 completed_actions = past + not_past
                 success_rate = past / completed_actions if completed_actions else 0.0
-                print(success_rate, flush=True)
+
+                print(last_accuracy, end=" ", flush=True)
+                print(float(success_rate), flush=True)
+
+                Episode_Payload = [
+                    episode_count,
+                    last_episode_reward,
+                    last_episode_length,
+                    1 if last_maze_solved else 0,
+                    success_rate,
+                    last_energy_used,
+                    last_regions_explored,
+                    "completed" # added status to CSV's
+                ]
+
+                network.LogDataToCSV(
+                    Episode_Payload, None, None, "ep", agnt
+                )
+
+                network.LogDataToCSV(
+                    last_pixel_grid, last_accuracy, None, "mze", agnt
+                )
+
+                episode_count += 1
+
                 network.EnergyUsed = 0.0
                 episode_reward = 0.0
                 episode_length = 0
 
-                start_point, end_point, maze_size, grid_distance, walls, pixel_grid = get_new_training_example(x, network.k, network.sd)
+                start_point, end_point, maze_size, grid_distance, walls, pixel_grid = (
+                    get_new_training_example(x, network.k, network.sd)
+                )
+
                 robot_pos = np.array(start_point, dtype=np.float32)
                 end_point = np.array(end_point, dtype=np.float32)
                 walls_np, BSP = _build_bsp_tree(walls)
                 angle = np.float32((7 * math.pi) / 4)
+
                 maze_solved = False
                 RegionsExplored = set()
                 robot_path = [robot_pos.copy()]
-                A_star_path = Normal_A_star_search(np.array(pixel_grid), list(start_point), list(end_point))
+
+                A_star_path = Normal_A_star_search(
+                    np.array(pixel_grid),
+                    list(start_point),
+                    list(end_point)
+                )
+
             else:
                 robot_pos = new_pos
                 angle = new_angle
@@ -474,17 +520,25 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                 time.sleep(ACTION_DELAY_SECONDS)
 
         if episode_length > 0:
-            Episode_Payload = [episode_count, episode_reward, episode_length, 1 if maze_solved else 0, success_rate, network.EnergyUsed, len(RegionsExplored)]
-            ACCURACY = network.GetRobotAccuracy(np.asarray(A_star_path), np.asarray(robot_path))
-            LoggedPixelGrid = pixel_grid
-        else:
-            Episode_Payload = [episode_count, last_episode_reward, last_episode_length, 1 if last_maze_solved else 0, success_rate, last_energy_used, last_regions_explored]
-            ACCURACY = last_accuracy
-            LoggedPixelGrid = last_pixel_grid
+            Episode_Payload = [
+                episode_count,
+                episode_reward,
+                episode_length,
+                1 if maze_solved else 0,
+                success_rate,
+                network.EnergyUsed,
+                len(RegionsExplored),
+                "partial" # here to
+            ]
 
-        action_payload = [sum_action_directions / network.MaxSteps, sum_action_step_sizes / network.MaxSteps]
-        network.LogDataToCSV(Episode_Payload, network.actions.numpy().tolist(), action_payload, "eps", agnt)
-        network.LogDataToCSV(LoggedPixelGrid, ACCURACY, None, "mze", agnt)
+            ACCURACY = network.GetRobotAccuracy(
+                np.asarray(A_star_path),
+                np.asarray(robot_path)
+            )
+
+            network.LogDataToCSV(Episode_Payload, None, None, "ep", agnt)
+            network.LogDataToCSV(pixel_grid, ACCURACY, None, "mze", agnt)
+
         episode_count += 1
         episode_reward = 0.0
         network.EnergyUsed = 0.0
@@ -570,8 +624,6 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             network.log_w_turn.clamp_(math.log(1e-4), math.log(10.0))
 
         network.clear_memory(MaxSteps)
-        print(time.perf_counter() - Start)
-        sys.exit()
 
 if __name__ == "__main__":
     StartAgent(48, 24, 24, 100, 26, "orth", 0.5, 0, 360, None)
