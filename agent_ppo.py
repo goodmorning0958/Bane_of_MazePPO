@@ -2,7 +2,6 @@ import csv
 import json
 import math
 import time
-
 import numpy as np
 import torch
 import torch.nn as nn
@@ -10,15 +9,15 @@ import torch.nn.functional as F
 import torch.distributions as dist
 from fastdtw import fastdtw
 from scipy.spatial.distance import euclidean
-
 from training_example_generator import get_new_training_example
 from SImulated_BSP_LiDAR import Tree
 from A_star_search import Normal_A_star_search
 from RunIntoWall import RunIntoWall
 from PPO_action_converter import ConvertRobotAction
 from agent_viewer import Dashboard
+import sys
 
-
+# BSP tree
 raycaster_env = Tree()
 
 # Flags
@@ -32,8 +31,7 @@ TURN_REWARD_WEIGHT = 0.2
 TIME_REWARD_WEIGHT = 0.3
 REWARD_DEBUG_EVERY = 20
 
-
-def _fov_to_radians(value):
+def _fov_to_radians(value): # nice little helper funciton
     if value is None:
         return math.pi / 2
     value = float(value)
@@ -283,19 +281,19 @@ class ActorCritic(nn.Module):
     @torch.no_grad()
     def LogDataToCSV(Data1, Data2, Data3, CSVType, agnt_id):
         if CSVType == "eps":
-            with open(f"EpisodeData_{agnt_id}.csv", mode="w", newline="", encoding="utf-8") as file:
+            with open(f"EpisodeData_{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
                 csv.writer(file).writerow(Data1)
-            with open(f"RobotActions_{agnt_id}.csv", mode="w", newline="", encoding="utf-8") as file:
+            with open(f"RobotActions_{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
                 csv.writer(file).writerows(Data2)
-            with open(f"ActionData_{agnt_id}.csv", mode="w", newline="", encoding="utf-8") as file:
+            with open(f"ActionData_{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
                 csv.writer(file).writerow(Data3)
         elif CSVType == "trg":
-            with open(f"TrainingData_{agnt_id}.csv", mode="w", newline="", encoding="utf-8") as file:
+            with open(f"TrainingData_{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
                 csv.writer(file).writerow(Data1)
         else:
-            with open(f"Mazes_{agnt_id}.csv", mode="w", newline="", encoding="utf-8") as file:
+            with open(f"Mazes_{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
                 csv.writer(file).writerow([json.dumps(np.asarray(Data1).tolist())])
-            with open(f"Accuracies_{agnt_id}.csv", mode="w", newline="", encoding="utf-8") as file:
+            with open(f"Accuracies_{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
                 csv.writer(file).writerow([float(Data2)])
 
     @staticmethod
@@ -529,6 +527,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         advantages = (advantages - advantages_mean) / torch.clamp(advantages_std, min=1e-8)
 
         # TRAINING LOOP
+        Start = time.perf_counter()
         PPO_EPOCHS = 4
         params_before_update = [parameter.detach().clone() for parameter in ppo_parameters]
         for epoch in range(PPO_EPOCHS):
@@ -571,6 +570,10 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             network.log_w_turn.clamp_(math.log(1e-4), math.log(10.0))
 
         network.clear_memory(MaxSteps)
+        print(time.perf_counter() - Start)
+        sys.exit()
 
 if __name__ == "__main__":
     StartAgent(48, 24, 24, 100, 26, "orth", 0.5, 0, 360, None)
+
+sys.exit()
