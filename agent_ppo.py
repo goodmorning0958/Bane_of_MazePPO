@@ -22,7 +22,7 @@ raycaster_env = Tree()
 
 # Flags
 ACTION_DELAY_SECONDS = 0.0
-ROLLOUTS = 100  # Increased so training actually runs
+ROLLOUTS = 1
 
 DEAD_END_IS_TERMINAL = True
 
@@ -70,7 +70,7 @@ class ActorCritic(nn.Module):
 
         self.clear_memory(self.MaxSteps)
 
-        # Actor network (Removed LayerNorm to preserve absolute spatial scale)
+        # Actor network 
         self.act1 = nn.Linear(self.inputs, h1)
         self.act2 = nn.Linear(h1, h2)
         self.out = nn.Linear(h2, action_dim)
@@ -81,6 +81,7 @@ class ActorCritic(nn.Module):
         self.crit2 = nn.Linear(h1, h2)
         self.val_out = nn.Linear(h2, 1)
 
+        # a way for the agent to optimize its own cirriculum.
         self.k = nn.Parameter(torch.tensor(5.89))
         self.sd = nn.Parameter(torch.tensor(20.0))
 
@@ -138,7 +139,6 @@ class ActorCritic(nn.Module):
         angle_action = angle_dist.sample()
         step_action = step_dist.sample()
         
-        # Clip actions to valid physical ranges
         angle_action = torch.clamp(angle_action, -math.pi, math.pi)
         step_action = torch.clamp(step_action, 0.0, 5.0)
 
@@ -249,7 +249,6 @@ class ActorCritic(nn.Module):
         self.EnergyUsed += self.last_total_penalty
         safe_maze_size = max(float(maze_size), 1e-6)
         
-        # Normalized and scaled reward structure to prevent gradient explosion
         reward = 1.0 * (distance_progress / safe_maze_size) - 0.1 * (step_size / safe_maze_size) - total_penalty_energy 
 
         if failed_by_collision:
@@ -378,7 +377,6 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         goal_successes = 0
         lidar_seconds_this_rollout = 0.0
 
-        # Clean rollout loop without mid-buffer environment resets
         for step in range(network.MaxSteps):
             done = False
 
@@ -492,7 +490,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         returns = advantages + values
         advantages = (advantages - advantages_mean) / torch.clamp(advantages_std, min=1e-8)
 
-        # TRAINING PPO EPOCHS
+        # TRAINING PPO LOOP
         PPO_EPOCHS = 4
         for epoch in range(PPO_EPOCHS):
             shuffled_indices = torch.randperm(episode_length)
