@@ -22,7 +22,7 @@ raycaster_env = Tree()
 
 # Flags
 ACTION_DELAY_SECONDS = 0.0
-ROLLOUTS = 1
+ROLLOUTS = 5
 
 DEAD_END_IS_TERMINAL = True
 
@@ -493,7 +493,13 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             advantages[t] = advantage
             next_advantage = advantage
 
-        advantages_std, advantages_mean = torch.std_mean(advantages[:episode_length])
+        advantages_slice = advantages[:episode_length]
+        if episode_length > 1:
+            advantages_std, advantages_mean = torch.std_mean(advantages_slice)
+        else:
+            advantages_std = torch.tensor(1.0, dtype=torch.float32)
+            advantages_mean = torch.tensor(0.0, dtype=torch.float32)
+
         returns = advantages + values
         advantages = (advantages - advantages_mean) / torch.clamp(advantages_std, min=1e-8)
 
