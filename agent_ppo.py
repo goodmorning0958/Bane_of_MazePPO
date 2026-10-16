@@ -22,7 +22,7 @@ raycaster_env = Tree()
 
 # Flags
 ACTION_DELAY_SECONDS = 0.0
-ROLLOUTS = 5
+ROLLOUTS = 20
 
 DEAD_END_IS_TERMINAL = True
 
@@ -353,9 +353,6 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
     ppo_parameters = [parameter for name, parameter in network.named_parameters() if name != "log_w_turn"]
     optimizer = torch.optim.Adam(ppo_parameters, lr=3e-4)
     w_optimizer = torch.optim.Adam([network.log_w_turn], lr=1e-3)
-
-    dashboard = Dashboard()
-    dashboard.start()
 
     for _rollout in range(ROLLOUTS):
         start_point, end_point, maze_size, grid_distance, walls, pixel_grid = get_new_training_example(x, network.k, network.sd)
