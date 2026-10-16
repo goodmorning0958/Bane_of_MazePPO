@@ -387,18 +387,22 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             State.append(float(maze_size))
             State.append(distance_finish)
 
+            # Get action
             Action, log_prob, value, _, _ = network.get_action_and_value(State)
 
+            # params (old angle, angle, ect.)
             old_angle = float(angle)
             new_angle = float(Action[0])
             step_size = float(Action[1])
-            
+
+            # virtually update robot stats
             new_pos = np.floor(robot_pos + step_size * np.array([np.cos(new_angle), np.sin(new_angle)])).astype(np.float32)
             robot_path.append(new_pos.copy())
 
             angle_diff_step = abs((new_angle - old_angle + math.pi) % (2 * math.pi) - math.pi)
             total_turn_delta += angle_diff_step
 
+            # Get state info
             run_into_wall = bool(RunIntoWall(robot_pos, walls, new_pos[0] - robot_pos[0], new_pos[1] - robot_pos[1]))
             in_dead_end, region_pos = network.InDeadEnd(grid_distance, new_pos, walls_np)
             region_tuple = tuple(region_pos.tolist())
@@ -406,6 +410,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             if region_unexplored:
                 RegionsExplored.add(region_tuple)
 
+            # Get reward
             distance_progress = distance_finish - float(np.linalg.norm(end_point - new_pos))
             Reward, done, maze_solved = network.reward(
                 distance_progress, run_into_wall, in_dead_end, distance_finish, 
@@ -438,7 +443,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         completed_actions = past + not_past
         success_rate = 0.0 if completed_actions == 0 else past / completed_actions
 
-        ACCURACY = network.GetRobotAccuracy(np.asarray(A_star_path), np.asarray(robot_path))
+        ACCURACY = network.GetRobotAccuracy(np.asarray(A_star_path), np.asarray(robot_path)) # Accuracy uses A star (NOT IN THE REWARD)
 
         Episode_Payload = [
             episode_count,
@@ -451,6 +456,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             "completed" if done else "partial"
         ]
 
+        # Log data
         network.LogDataToCSV(Episode_Payload, None, None, "ep", agnt)
         network.LogDataToCSV(pixel_grid, ACCURACY, None, "mze", agnt)
         episode_count += 1
@@ -476,6 +482,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                 _, _, next_value = network.forward(torch.as_tensor(FinalState, dtype=torch.float32))
                 next_value = next_value.squeeze(-1)
 
+        # Advantages (GAE)
         advantages = torch.zeros(MaxSteps, dtype=torch.float32)
         next_advantage = torch.tensor(0.0, dtype=torch.float32)
         for t in reversed(range(episode_length)):
@@ -522,6 +529,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                 Training_Payload = [episode_count, success_rate, total_loss.item(), actor_loss.item(), critic_loss.item(), entropy_mean.item(), batch_advantages.mean().item()]
                 network.LogDataToCSV(Training_Payload, None, None, "trg", agnt)
 
+        # Update weights
         avg_turn = total_turn_delta / max(1, episode_length)
         w_turn_loss = -network.w_turn * (avg_turn - network.target_max_turn)
         w_optimizer.zero_grad()
