@@ -214,13 +214,14 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             lidar_seconds_this_rollout += network.time_cost
             rays_this_rollout += network.last_rays_cast
             distance_finish = float(np.linalg.norm(end_point - robot_pos))
+
             # Get action
             inference_start = time.perf_counter()
             Action, log_prob, value, LatentAction, _ = network.get_action_and_value(State)
             inference_seconds += time.perf_counter() - inference_start
 
             # Update the agent viewer
-            Dashboard.send(np.array(Action), walls_np)
+            Dashboard.send(np.array([[Action]]), walls_np)
 
             # params (old angle, angle, etc.)
             old_angle = float(angle)
@@ -352,6 +353,3 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
     network.output_directory = str(directory)
     return network
 
-
-if __name__ == "__main__":
-    final_network = StartAgent(48, 24, 24, 9000, 29, "orth", 0.5, 0, 360, None)
