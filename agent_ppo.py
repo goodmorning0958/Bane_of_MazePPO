@@ -221,7 +221,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             inference_seconds += time.perf_counter() - inference_start
 
             # Update the agent viewer
-            Dashboard.send(np.array([[Action]]), walls_np)
+            Dashboard.send([[Action]], walls)
 
             # params (old angle, angle, etc.)
             old_angle = float(angle)
