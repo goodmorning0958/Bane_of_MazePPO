@@ -37,7 +37,6 @@ ENTROPY_COEF = 0.01
 CURRICULUM_ENABLED = False
 REWARD_DEBUG_EVERY = 20
 
-
 def _compute_gae(rewards, values, dones, next_value, gamma=0.99, lam=0.95): # advantages goes to loss
     advantages = torch.zeros_like(rewards)
     next_advantage = torch.zeros((), dtype=values.dtype)
@@ -221,7 +220,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             inference_seconds += time.perf_counter() - inference_start
 
             # Update the agent viewer
-            Dashboard.send([[Action]], walls)
+            #Dashboard.send([[Action]], walls)
 
             # params (old angle, angle, etc.)
             old_angle = float(angle)
