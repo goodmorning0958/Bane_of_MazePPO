@@ -1,0 +1,2 @@
+episode,reward,steps,success,success_rate,raw_energy,regions,status,penalty_sum,path_length,turn_radians,lidar_seconds,inference_seconds,rays_cast,termination
+0,-5.028843087282404,1,0,0.0,0.0,2,completed,0.0031117012036753567,1.934114694595337,0.31117013891472123,0.002176899986807257,0.0021130999957676977,24,collision
