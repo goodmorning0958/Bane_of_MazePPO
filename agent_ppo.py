@@ -22,7 +22,7 @@ raycaster_env = Tree()
 
 # Flags
 ACTION_DELAY_SECONDS = 0.0
-ROLLOUTS = 20
+ROLLOUTS = 1
 
 DEAD_END_IS_TERMINAL = True
 
@@ -115,13 +115,13 @@ class ActorCritic(nn.Module):
     def forward(self, state):
         state_tensor = torch.as_tensor(state, dtype=torch.float32)
 
-        actor = F.relu(self.act1(state_tensor))
-        actor = F.relu(self.act2(actor))
+        actor = self.act1(state_tensor)
+        actor = self.act2(actor)
         mean = self.out(actor)
         stds = torch.clamp(torch.exp(self.log_std), min=1e-4, max=5.0)
 
-        critic = F.relu(self.crit1(state_tensor))
-        critic = F.relu(self.crit2(critic))
+        critic = self.crit1(state_tensor)
+        critic = self.crit2(critic)
         value = self.val_out(critic).squeeze(-1)
         return mean, stds, value
 
@@ -375,6 +375,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         lidar_seconds_this_rollout = 0.0
 
         for step in range(network.MaxSteps):
+            print(step)
             done = False
 
             State = network.GetState(robot_pos, VARNumberOfRayCasts, BSP, network.RayOffset, network.FOV, angle, VARRayDistance, maze_size)
@@ -386,6 +387,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
 
             # Get action
             Action, log_prob, value, _, _ = network.get_action_and_value(State)
+            print(Action)
 
             # params (old angle, angle, ect.)
             old_angle = float(angle)
@@ -436,12 +438,12 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
 
             if ACTION_DELAY_SECONDS > 0:
                 time.sleep(ACTION_DELAY_SECONDS)
-
+ 
         completed_actions = past + not_past
         success_rate = 0.0 if completed_actions == 0 else past / completed_actions
-
+        
         ACCURACY = network.GetRobotAccuracy(np.asarray(A_star_path), np.asarray(robot_path)) # Accuracy uses A star (NOT IN THE REWARD)
-
+        
         Episode_Payload = [
             episode_count,
             episode_reward,
