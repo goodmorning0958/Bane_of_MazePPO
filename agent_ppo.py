@@ -195,6 +195,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         start_region = None
         if grid_distance > 0:
             start_region = tuple((np.floor(robot_pos / grid_distance) * grid_distance).tolist())
+            goal_region = tuple((np.floor(end_point / grid_distance) * grid_distance).tolist())
             RegionsExplored.add(start_region)
 
         network.EnergyUsed = 0.0
@@ -239,7 +240,8 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             run_into_wall = bool(RunIntoWall(robot_pos, walls, new_pos[0] - robot_pos[0], new_pos[1] - robot_pos[1]))
             in_dead_end, region_pos = network.InDeadEnd(grid_distance, new_pos, walls_np)
             region_tuple = tuple(region_pos.tolist())
-            if region_tuple == start_region:      
+
+            if region_tuple == start_region or region_tuple == goal_region:      
                 in_dead_end = False
             region_unexplored = region_tuple not in RegionsExplored
 

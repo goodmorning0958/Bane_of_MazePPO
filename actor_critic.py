@@ -158,7 +158,7 @@ class ActorCritic(nn.Module):
                 p1[axis], p2[axis] = u, v
                 pieces.append([p1, p2])
         segments = np.asarray(pieces, dtype=np.float32)
-        
+
         segment_mids = np.mean(segments, axis=1)
         neighbour_counter = 0
 
@@ -199,16 +199,18 @@ class ActorCritic(nn.Module):
 
     @torch.no_grad()
     def EnergyCost(self, angle, step_size, new_angle, done, c1, c2, c3):
-        _, energy_value = ConvertRobotAction([new_angle, step_size], done)
-        energy_value = float(energy_value)
+        turn = (new_angle - angle + math.pi) % (2 * math.pi) - math.pi
+        _, energy_value = float(ConvertRobotAction([turn, step_size], done))
+
         if not math.isfinite(energy_value):
             raise ValueError("ConvertRobotAction returned non-finite energy.")
+        
         raw_energy = max(0.0, energy_value)
         angle_diff = abs((new_angle - angle + math.pi) % (2 * math.pi) - math.pi)
         turn_cost = float(self.w_turn.item()) * angle_diff
         compute_time = max(0.0, float(self.time_cost))
         self.last_raw_energy = raw_energy
-        # One unit is the episode energy budget divided by the step limit.
+
         energy_scale = self.VARAllowedEnergy / self.MaxSteps
         self.last_energy_component = float(c1 * raw_energy / energy_scale)
         self.last_turn_component = float(c2 * turn_cost)
@@ -223,7 +225,7 @@ class ActorCritic(nn.Module):
         failed_by_collision = bool(run_into_wall)
         failed_by_dead_end = bool(in_dead_end and DEAD_END_IS_TERMINAL)
         action_done = bool(done or failed_by_collision or failed_by_dead_end or goal_reached)
-        total_penalty_energy = self.EnergyCost(
+        total_penalty_energy = min(1.0, success_rate / 0.5) * self.EnergyCost(
             angle, step_size, new_angle, action_done,
             ENERGY_REWARD_WEIGHT, TURN_REWARD_WEIGHT, TIME_REWARD_WEIGHT
         )
