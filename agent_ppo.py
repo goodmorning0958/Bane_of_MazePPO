@@ -325,7 +325,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
         for row in diagnostics:
             network.LogDataToCSV([episode_count, success_rate] + row, None, None, "trg", agnt, directory, test)
 
-        with open(directory / f"UpdateData_{agnt}.csv", "a", newline="", encoding="utf-8") as f:
+        with open(directory / f"UpdateData_{test}{agnt}.csv", "a", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow([episode_count, buffered_steps, len(diagnostics), final_kl, int(kl_stopped), explained_variance, training_seconds])
 
         # Update weights adam
