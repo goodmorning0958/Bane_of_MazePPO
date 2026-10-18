@@ -264,20 +264,20 @@ class ActorCritic(nn.Module):
 
     @staticmethod
     @torch.no_grad()
-    def LogDataToCSV(Data1, Data2, Data3, CSVType, agnt_id, directory="."):
+    def LogDataToCSV(Data1, Data2, Data3, CSVType, agnt_id, test, directory="."):
         if CSVType == "ep":
-            with open(Path(directory) / f"EpisodeData_{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
+            with open(Path(directory) / f"EpisodeData_{test}{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
                 csv.writer(file).writerow(Data1)
         elif CSVType == "act":
-            with open(Path(directory) / f"ActionData_{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
+            with open(Path(directory) / f"ActionData_{test}{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
                 csv.writer(file).writerow(Data2)
         elif CSVType == "trg":
-            with open(Path(directory) / f"TrainingData_{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
+            with open(Path(directory) / f"TrainingData_{test}{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
                 csv.writer(file).writerow(Data1)
         elif CSVType == "mze":
-            with open(Path(directory) / f"Mazes_{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
+            with open(Path(directory) / f"Mazes_{test}{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
                 csv.writer(file).writerow([json.dumps(np.asarray(Data1).tolist())])
-            with open(Path(directory) / f"Accuracies_{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
+            with open(Path(directory) / f"Accuracies_{test}{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
                 csv.writer(file).writerow([float(Data2)])
 
     @staticmethod

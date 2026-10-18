@@ -1,2 +1,0 @@
-episode_count,transitions,minibatch_updates,final_kl,kl_stopped,explained_variance,training_seconds
-750,1058,272,0.014750668779015541,0,-0.3432798385620117,1.0076351000461727

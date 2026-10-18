@@ -118,7 +118,7 @@ def _ppo_update(network, optimizer, ppo_parameters, states, actions, log_probs, 
     return diagnostics, final_kl, stopped or final_kl > TARGET_KL, explained_variance
 
 # main
-def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARWeightInitType, VARtargetMaxTurn, agnt, VARFOV, VARRayDistance, *, seed=SEED, rollouts=None, output_dir=None):
+def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARWeightInitType, VARtargetMaxTurn, agnt, VARFOV, VARRayDistance, *, seed=SEED, rollouts=None, output_dir=None):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -167,7 +167,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
     }
 
     for name, header in headers.items():
-        with open(directory / f"{name}_{agnt}.csv", "x", newline="", encoding="utf-8") as f:
+        with open(directory / f"{name}_{test}{agnt}.csv", "x", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(header)
 
     capacity = MIN_ROLLOUT_STEPS + network.MaxSteps
@@ -269,7 +269,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             network.LogDataToCSV(None, [float(Action[0]), float(Action[1]), float(value), Reward,
                                        network.last_total_penalty, network.last_raw_energy,
                                        network.last_energy_component, network.last_turn_component,
-                                       network.last_time_component], None, "act", agnt, directory)
+                                       network.last_time_component], None, "act", agnt, directory, test)
             # update the robot (angle / position)
             robot_pos, angle = new_pos, new_angle
             if done:
@@ -294,8 +294,8 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                            inference_seconds, rays_this_rollout, termination]
 
         # Log data
-        network.LogDataToCSV(Episode_Payload, None, None, "ep", agnt, directory)
-        network.LogDataToCSV(pixel_grid, ACCURACY, None, "mze", agnt, directory)
+        network.LogDataToCSV(Episode_Payload, None, None, "ep", agnt, directory, test)
+        network.LogDataToCSV(pixel_grid, ACCURACY, None, "mze", agnt, directory, test)
         episode_count += 1
 
         # Comput GAE and PPO / other opitimizations
@@ -323,7 +323,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
 
         training_seconds = time.perf_counter() - update_start
         for row in diagnostics:
-            network.LogDataToCSV([episode_count, success_rate] + row, None, None, "trg", agnt, directory)
+            network.LogDataToCSV([episode_count, success_rate] + row, None, None, "trg", agnt, directory, test)
 
         with open(directory / f"UpdateData_{agnt}.csv", "a", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow([episode_count, buffered_steps, len(diagnostics), final_kl, int(kl_stopped), explained_variance, training_seconds])
