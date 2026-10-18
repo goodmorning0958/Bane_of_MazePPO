@@ -15,14 +15,11 @@ from scipy.spatial.distance import euclidean
 from PPO_action_converter import ConvertRobotAction
 from maze_utils import raycaster_env, _fov_to_radians
 
-# These settings were originally declared alongside ActorCritic in agent_ppo.py.
-# Their values are unchanged; they are kept here because ActorCritic uses them.
 ADAPT_TURN_WEIGHT = False
 DEAD_END_IS_TERMINAL = True
 ENERGY_REWARD_WEIGHT = 0.1
 TURN_REWARD_WEIGHT = 0.2
 TIME_REWARD_WEIGHT = 0.0
-
 
 class ActorCritic(nn.Module):
     def __init__(self, h1, h2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, VARFOV, inputs, action_dim=2):
@@ -31,28 +28,28 @@ class ActorCritic(nn.Module):
         self.inputs = int(inputs)
         self.VARNumberOfRayCasts = int(VARNumberOfRayCasts)
         self.VARAllowedEnergy = float(VARAllowedEnergy)
-        if action_dim != 2 or self.VARNumberOfRayCasts <= 0:
-            raise ValueError("Use two actions and at least one LiDAR ray.")
-        if self.inputs != self.VARNumberOfRayCasts + 5:
-            raise ValueError("NNinputs must equal VARNumberOfRayCasts + 5 (goal, heading, budget).")
-        if not math.isfinite(self.VARAllowedEnergy) or self.VARAllowedEnergy <= 0:
-            raise ValueError("VARAllowedEnergy must be finite and positive.")
+        
         self.EnergyUsed = 0.0
         self.clear_memory(self.MaxSteps)
         # Actor network
+
         self.act1 = nn.Linear(self.inputs, h1)
         self.act2 = nn.Linear(h1, h2)
         self.out = nn.Linear(h2, action_dim)
         self.log_std = nn.Parameter(torch.full((action_dim,), -0.5))
         # Critic network
+
         self.crit1 = nn.Linear(self.inputs, h1)
         self.crit2 = nn.Linear(h1, h2)
         self.val_out = nn.Linear(h2, 1)
-        # Fixed experiment settings: the imported simulator is not differentiable.
+
         self.k = nn.Parameter(torch.tensor(5.89), requires_grad=False)
         self.sd = nn.Parameter(torch.tensor(20.0), requires_grad=False)
+
         # Ray offset
         self.RayOffset = nn.Parameter(torch.tensor(0.1, dtype=torch.float32), requires_grad=False)
+
+        # other optimizable parameters
         self.log_w_turn = nn.Parameter(torch.tensor(math.log(0.05)), requires_grad=ADAPT_TURN_WEIGHT)
         self.target_max_turn = float(VARtargetMaxTurn)
         self.FOV = _fov_to_radians(VARFOV)
@@ -138,22 +135,40 @@ class ActorCritic(nn.Module):
     def InDeadEnd(self, grid_distance, robot_pos, segments):
         if grid_distance <= 0:
             return False, np.asarray(robot_pos, dtype=np.float32)
+        
         region_pos = np.floor(np.asarray(robot_pos) / grid_distance) * grid_distance
         segments = np.asarray(segments, dtype=np.float32)
+
         if segments.size == 0:
             return False, region_pos
+        
         if segments.ndim == 2 and segments.shape[1] == 4:
             segments = segments.reshape(-1, 2, 2)
+
         if segments.ndim != 3 or segments.shape[1:] != (2, 2):
             return False, region_pos
+
+        pieces = []
+        for seg_a, seg_b in segments:
+            axis = 1 if seg_a[0] == seg_b[0] else 0
+            lo, hi = sorted((float(seg_a[axis]), float(seg_b[axis])))
+            cuts = [lo] + [float(k * grid_distance) for k in range(int(lo // grid_distance) + 1, int(np.ceil(hi / grid_distance))) if lo < k * grid_distance < hi] + [hi]
+            for u, v in zip(cuts[:-1], cuts[1:]):
+                p1, p2 = seg_a.copy(), seg_b.copy()
+                p1[axis], p2[axis] = u, v
+                pieces.append([p1, p2])
+        segments = np.asarray(pieces, dtype=np.float32)
+        
         segment_mids = np.mean(segments, axis=1)
         neighbour_counter = 0
+
         corners = [
             region_pos,
             region_pos + np.array([0, grid_distance]),
             region_pos + np.array([grid_distance, grid_distance]),
             region_pos + np.array([grid_distance, 0]),
         ]
+
         for segment, segment_mid in zip(segments, segment_mids):
             seg_p1, seg_p2 = segment
             segment_counted = False

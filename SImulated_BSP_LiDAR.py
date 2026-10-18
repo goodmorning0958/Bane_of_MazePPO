@@ -60,10 +60,10 @@ class Tree:
             classification_dot_end = np.dot(target_point_end - splitter_mid_point, splitter_normal)
             classification_dot_start = np.dot(target_point_start - splitter_mid_point, splitter_normal)
 
-            if classification_dot_start > 1e-5 and classification_dot_end > 1e-5:
-               tree_front_count.append([idx, start, end, seg, norm]) 
-            elif classification_dot_start < -1e-5 and classification_dot_end < -1e-5:
-                 tree_back_count.append([idx, start, end, seg, norm])
+            if classification_dot_start > -1e-5 and classification_dot_end > -1e-5 and (classification_dot_start > 1e-5 or classification_dot_end > 1e-5):
+                tree_front_count.append([idx, start, end, seg, norm])
+            elif classification_dot_start < 1e-5 and classification_dot_end < 1e-5 and (classification_dot_start < -1e-5 or classification_dot_end < -1e-5):
+                tree_back_count.append([idx, start, end, seg, norm])
             elif (classification_dot_start > 1e-5 and classification_dot_end < -1e-5) or (classification_dot_start < -1e-5 and classification_dot_end > 1e-5):
 
                  intersection_parameter = classification_dot_start / (classification_dot_start - classification_dot_end)
@@ -174,7 +174,8 @@ class Tree:
         else:
              distance_front = self.traverse_tree(current_node['front'], robot_pos, facing_vec)
              distance_back = self.traverse_tree(current_node['back'], robot_pos, facing_vec)
-             return min(distance_front, distance_back)
+             distance_to = float('inf') if d is None else d
+             return min(distance_front, distance_back, distance_to)
 
         dist = self.traverse_tree(first_child, robot_pos, facing_vec)
 

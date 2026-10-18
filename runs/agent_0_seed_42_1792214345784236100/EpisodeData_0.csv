@@ -1,1 +1,0 @@
-episode,reward,steps,success,success_rate,raw_energy,regions,status,penalty_sum,path_length,turn_radians,lidar_seconds,inference_seconds,rays_cast,termination

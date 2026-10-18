@@ -26,15 +26,15 @@ from maze_utils import raycaster_env, _fov_to_radians, _build_bsp_tree
 
 # Flags
 ACTION_DELAY_SECONDS = 0.0
-ROLLOUTS = 5
+ROLLOUTS = 750
 SEED = 42
-MIN_ROLLOUT_STEPS = 200 # must be positive
-PPO_EPOCHS = 4
+MIN_ROLLOUT_STEPS = 75000 # must be positive
+PPO_EPOCHS = 16
 MINIBATCH_SIZE = 64
 TARGET_KL = 0.02
 LEARNING_RATE = 3e-4
 ENTROPY_COEF = 0.01
-CURRICULUM_ENABLED = False
+CURRICULUM_ENABLED = True
 REWARD_DEBUG_EVERY = 20
 
 def _compute_gae(rewards, values, dones, next_value, gamma=0.99, lam=0.95): # advantages goes to loss
@@ -48,7 +48,6 @@ def _compute_gae(rewards, values, dones, next_value, gamma=0.99, lam=0.95): # ad
         advantages[t] = next_advantage
 
     return advantages, advantages + values
-
 
 def _ppo_update(network, optimizer, ppo_parameters, states, actions, log_probs, returns, advantages):
     advantages = advantages.detach().clone()
@@ -118,7 +117,6 @@ def _ppo_update(network, optimizer, ppo_parameters, states, actions, log_probs, 
 
     return diagnostics, final_kl, stopped or final_kl > TARGET_KL, explained_variance
 
-
 # main
 def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARWeightInitType, VARtargetMaxTurn, agnt, VARFOV, VARRayDistance, *, seed=SEED, rollouts=None, output_dir=None):
     random.seed(seed)
@@ -139,9 +137,6 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
     network = ActorCritic(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, VARFOV, NNinputs)
     network.InitializeWeights(VARWeightInitType)
 
-    dashboard = Dashboard()
-    dashboard.start()
-
     # config
     ppo_parameters = [p for name, p in network.named_parameters() if p.requires_grad and name != "log_w_turn"]
     optimizer = torch.optim.Adam(ppo_parameters, lr=LEARNING_RATE, eps=1e-5)
@@ -161,6 +156,7 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
                   learning_rate=LEARNING_RATE, entropy_coef=ENTROPY_COEF,
                   dead_end_terminal=DEAD_END_IS_TERMINAL, torch_version=torch.__version__,
                   numpy_version=np.__version__, python_version=sys.version)
+    
     config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
     headers = {
         "EpisodeData": ["episode", "reward", "steps", "success", "success_rate", "raw_energy", "regions", "status",
@@ -169,9 +165,11 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         "TrainingData": ["episode_count", "success_rate", "total_loss", "actor_loss", "critic_huber_loss", "bounded_entropy_mc", "advantage_mean", "kl_before_step", "clip_fraction", "grad_norm_before_clip"],
         "UpdateData": ["episode_count", "transitions", "minibatch_updates", "final_kl", "kl_stopped", "explained_variance", "training_seconds"],
     }
+
     for name, header in headers.items():
         with open(directory / f"{name}_{agnt}.csv", "x", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(header)
+
     capacity = MIN_ROLLOUT_STEPS + network.MaxSteps
     network.clear_memory(capacity)
     buffered_steps = 0
@@ -184,6 +182,8 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         robot_pos = np.array(start_point, dtype=np.float32)
         end_point = np.array(end_point, dtype=np.float32)
         walls_np, BSP = _build_bsp_tree(walls)
+        robot_pos = robot_pos + 0.5
+        end_point = end_point + 0.5
 
         # Initializations
         angle = float((7 * math.pi) / 4)
@@ -192,8 +192,10 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         episode_start = buffered_steps
         RegionsExplored = set()
 
+        start_region = None
         if grid_distance > 0:
-            RegionsExplored.add(tuple((np.floor(robot_pos / grid_distance) * grid_distance).tolist()))
+            start_region = tuple((np.floor(robot_pos / grid_distance) * grid_distance).tolist())
+            RegionsExplored.add(start_region)
 
         network.EnergyUsed = 0.0
         robot_path = [robot_pos.copy()]
@@ -237,15 +239,18 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
             run_into_wall = bool(RunIntoWall(robot_pos, walls, new_pos[0] - robot_pos[0], new_pos[1] - robot_pos[1]))
             in_dead_end, region_pos = network.InDeadEnd(grid_distance, new_pos, walls_np)
             region_tuple = tuple(region_pos.tolist())
+            if region_tuple == start_region:      
+                in_dead_end = False
             region_unexplored = region_tuple not in RegionsExplored
-            if region_unexplored:
-                RegionsExplored.add(region_tuple)
 
             # Get reward
             next_distance_finish = float(np.linalg.norm(end_point - new_pos))
             distance_progress = distance_finish - next_distance_finish
+            in_goal_pixel = bool(np.all(np.floor(new_pos / grid_distance) == np.floor(end_point / grid_distance)))
+            goal_distance = 0.0 if in_goal_pixel else next_distance_finish
+
             Reward, done, maze_solved = network.reward(
-                distance_progress, run_into_wall, in_dead_end, next_distance_finish,
+                distance_progress, run_into_wall, in_dead_end, goal_distance,
                 region_unexplored, robot_pos, new_pos, step_size, success_rate,
                 old_angle, new_angle, maze_size, done
             )
@@ -290,14 +295,6 @@ def StartAgent(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARW
         network.LogDataToCSV(Episode_Payload, None, None, "ep", agnt, directory)
         network.LogDataToCSV(pixel_grid, ACCURACY, None, "mze", agnt, directory)
         episode_count += 1
-
-        print( # standard debug I think
-            f"Episode {episode_count}/{rollouts} | "
-            f"Steps: {episode_length} | "
-            f"Reward: {episode_reward:.3f} | "
-            f"Success: {maze_solved} | "
-            f"Termination: {termination}"
-        )
 
         # Comput GAE and PPO / other opitimizations
         if done:

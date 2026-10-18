@@ -77,7 +77,8 @@ def get_new_training_example(training_steps, k=5.89, sd=20):
     maze_size = int(x[np.argmax(probabilities)])
     
     # generate grid_distance (again based on a prob distribution)
-    grid_distances = [i for i in range(1, maze_size // 3 + 1) if maze_size % i == 0]
+    # corridors at least 2 px wide; no divisibility needed (the grid is padded up to maze_size)
+    grid_distances = list(range(2, max(2, maze_size // 7) + 1))
 
     # Piecewise distribution function
     if not grid_distances:
@@ -154,11 +155,13 @@ def get_new_training_example(training_steps, k=5.89, sd=20):
 
     walls = []
 
-    # Convert the maze to a list of line-segments
-    for i in range(pixel_grid.shape[0]):
+    rows, cols = pixel_grid.shape
+
+    # cornvert the grid into a list of wall segments
+    for i in range(rows + 1):
         queue = []
-        for j in range(pixel_grid.shape[1]):
-            if pixel_grid[i, j] == 1:
+        for j in range(cols):
+            if 0 < i < rows and pixel_grid[i - 1, j] != pixel_grid[i, j]:
                 queue.append(j)
             else:
                 if queue:
@@ -167,10 +170,10 @@ def get_new_training_example(training_steps, k=5.89, sd=20):
         if queue:
             walls.append([[i, queue[0]], [i, queue[-1] + 1]])
 
-    for j in range(pixel_grid.shape[1]):
+    for j in range(cols + 1):
         queue = []
-        for i in range(pixel_grid.shape[0]):
-            if pixel_grid[i, j] == 1:
+        for i in range(rows):
+            if 0 < j < cols and pixel_grid[i, j - 1] != pixel_grid[i, j]:
                 queue.append(i)
             else:
                 if queue:
@@ -179,14 +182,4 @@ def get_new_training_example(training_steps, k=5.89, sd=20):
         if queue:
             walls.append([[queue[0], j], [queue[-1] + 1, j]])
 
-    return start_point, end_point, maze_size, grid_distance, walls, pixel_grid
-
-
-
-
-        
-         
-    
-        
-
-            
+    return start_point, end_point, pixel_grid.shape[0], grid_distance, walls, pixel_grid

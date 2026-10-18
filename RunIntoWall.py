@@ -23,7 +23,7 @@ def CheckIntersection(Wall, robot_pos, dx, dy):
 
 def RunIntoWall(robot_pos, walls, dx, dy):
     if walls is None or len(walls) == 0:
-        return float('inf')
+        return False
 
     for wall in walls:
         distance = CheckIntersection(wall, robot_pos, dx, dy)
