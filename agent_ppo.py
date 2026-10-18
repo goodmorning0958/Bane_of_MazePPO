@@ -229,7 +229,8 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             # params (old angle, angle, etc.)
             old_angle = float(angle)
             new_angle, step_size = float(Action[0]), float(Action[1])
-            # turn limit: no limit at success_rate 0, tightens to target_max_turn as the success rate rises
+
+            # added a way for early training for energy efficiency to 
             turn_limit = math.pi - (math.pi - VARtargetMaxTurn) * min(1.0, success_rate / TURN_LIMIT_SUCCESS)
             turn = (new_angle - old_angle + math.pi) % (2 * math.pi) - math.pi
             turn_excess = max(0.0, abs(turn) - turn_limit)    # how far past the limit the policy asked to turn

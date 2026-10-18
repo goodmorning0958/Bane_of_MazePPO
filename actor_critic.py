@@ -341,10 +341,9 @@ class ActorCritic(nn.Module):
         energy_remaining = max(0.0, 1.0 - self.EnergyUsed / self.VARAllowedEnergy)
         angle_finish = float(math.atan2(end_point[1] - robot_pos[1], end_point[0] - robot_pos[0]) - angle)
         distance_finish = float(np.linalg.norm(end_point - robot_pos))
-        
+
         return [d / max_distance for d in distances] + [
             float(goal_delta[0]), float(goal_delta[1]),
-            math.sin(float(angle)), math.cos(float(angle)), energy_remaining,
-            math.sin(angle_finish), math.cos(angle_finish), distance_finish,
+            math.sin(float(angle)), math.cos(float(angle)), angle, energy_remaining,
+            math.sin(angle_finish), math.cos(angle_finish), angle_finish, distance_finish,
         ]
-    
