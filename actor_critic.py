@@ -20,6 +20,7 @@ DEAD_END_IS_TERMINAL = True
 ENERGY_REWARD_WEIGHT = 0.1
 TURN_REWARD_WEIGHT = 0.2
 TIME_REWARD_WEIGHT = 0.0
+TURN_EXCESS_WEIGHT = 0.05
 
 class ActorCritic(nn.Module):
     def __init__(self, h1, h2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, VARFOV, inputs, action_dim=2):
@@ -97,7 +98,7 @@ class ActorCritic(nn.Module):
 
     @staticmethod
     def _action_log_prob(mean, stds, latent_action):
-        # Stable log derivative of tanh, including angle/step scaling.
+        # uses jacobian
         log_jacobian = 2.0 * (math.log(2.0) - latent_action - F.softplus(-2.0 * latent_action))
         log_jacobian = log_jacobian + latent_action.new_tensor([math.log(math.pi), math.log(2.5)])
         return (dist.Normal(mean, stds).log_prob(latent_action) - log_jacobian).sum(dim=-1)
@@ -108,14 +109,13 @@ class ActorCritic(nn.Module):
         latent_action = dist.Normal(mean, stds).sample()
         action = self._squash_action(latent_action)
         log_prob = self._action_log_prob(mean, stds, latent_action)
-        # Fourth return value is the latent sample; keep it for exact PPO scoring.
+
         return action.cpu().numpy(), log_prob.cpu(), value.cpu(), latent_action.cpu(), stds
 
     def evaluate_actions(self, states, actions):
-        # actions contains stored PRE-tanh samples, not physical commands.
         mean, stds, value = self.forward(states)
         new_log_prob = self._action_log_prob(mean, stds, actions)
-        # Reparameterized Monte Carlo entropy of the BOUNDED action distribution.
+
         sample = dist.Normal(mean, stds).rsample()
         entropy = -self._action_log_prob(mean, stds, sample)
         return new_log_prob, entropy, value
@@ -200,7 +200,8 @@ class ActorCritic(nn.Module):
     @torch.no_grad()
     def EnergyCost(self, angle, step_size, new_angle, done, c1, c2, c3):
         turn = (new_angle - angle + math.pi) % (2 * math.pi) - math.pi
-        _, energy_value = float(ConvertRobotAction([turn, step_size], done))
+        _, energy_value = ConvertRobotAction([turn, step_size], done)
+        energy_value = float(energy_value)
 
         if not math.isfinite(energy_value):
             raise ValueError("ConvertRobotAction returned non-finite energy.")
@@ -220,18 +221,28 @@ class ActorCritic(nn.Module):
         )
         return self.last_total_penalty
 
-    def reward(self, distance_progress, run_into_wall, in_dead_end, distance_finish, region_unexplored, robot_pos, new_pos, step_size, success_rate, angle, new_angle, maze_size, done):
+    def reward(self, distance_progress, run_into_wall, in_dead_end, distance_finish, region_unexplored, robot_pos, new_pos, step_size, success_rate, angle, new_angle, maze_size, done, turn_excess=0.0):
         goal_reached = distance_finish < 0.5
+
         failed_by_collision = bool(run_into_wall)
         failed_by_dead_end = bool(in_dead_end and DEAD_END_IS_TERMINAL)
+
         action_done = bool(done or failed_by_collision or failed_by_dead_end or goal_reached)
-        total_penalty_energy = min(1.0, success_rate / 0.5) * self.EnergyCost(
+
+        total_penalty_energy = self.EnergyCost(
             angle, step_size, new_angle, action_done,
-            ENERGY_REWARD_WEIGHT, TURN_REWARD_WEIGHT, TIME_REWARD_WEIGHT
+            ENERGY_REWARD_WEIGHT * min(1.0, success_rate / 0.4), TURN_REWARD_WEIGHT, TIME_REWARD_WEIGHT
         )
+
+        excess_penalty = TURN_EXCESS_WEIGHT * turn_excess
+        self.last_turn_component += excess_penalty
+        self.last_total_penalty += excess_penalty
+        total_penalty_energy += excess_penalty
+
         self.EnergyUsed += self.last_raw_energy
         safe_maze_size = max(float(maze_size), 1e-6)
         reward = 1.0 * (distance_progress / safe_maze_size) - 0.1 * (step_size / safe_maze_size) - total_penalty_energy
+
         if failed_by_collision:
             return float(reward - 5.0), True, False
         if goal_reached:
@@ -258,13 +269,13 @@ class ActorCritic(nn.Module):
                 else:
                     raise ValueError("Weight initialization must be 'orth', 'Kaim', or 'Xaiv'.")
                 nn.init.zeros_(module.bias)
-        # Start with small actor means, independent of observation width.
+
         nn.init.orthogonal_(self.out.weight, gain=0.01)
         nn.init.orthogonal_(self.val_out.weight, gain=1.0)
 
     @staticmethod
     @torch.no_grad()
-    def LogDataToCSV(Data1, Data2, Data3, CSVType, agnt_id, test, directory="."):
+    def LogDataToCSV(Data1, Data2, Data3, CSVType, agnt_id, directory=".", test=""):
         if CSVType == "ep":
             with open(Path(directory) / f"EpisodeData_{test}{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
                 csv.writer(file).writerow(Data1)
@@ -328,8 +339,12 @@ class ActorCritic(nn.Module):
 
         goal_delta = (np.asarray(end_point) - np.asarray(robot_pos)) / max(float(maze_size), 1e-6)
         energy_remaining = max(0.0, 1.0 - self.EnergyUsed / self.VARAllowedEnergy)
-
+        angle_finish = float(math.atan2(end_point[1] - robot_pos[1], end_point[0] - robot_pos[0]) - angle)
+        distance_finish = float(np.linalg.norm(end_point - robot_pos))
+        
         return [d / max_distance for d in distances] + [
             float(goal_delta[0]), float(goal_delta[1]),
             math.sin(float(angle)), math.cos(float(angle)), energy_remaining,
+            math.sin(angle_finish), math.cos(angle_finish), distance_finish,
         ]
+    

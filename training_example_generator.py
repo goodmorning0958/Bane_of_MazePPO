@@ -76,9 +76,7 @@ def get_new_training_example(training_steps, k=5.89, sd=20):
     probabilities = np.exp(-0.5 * (((x - size) / sd) ** 2))
     maze_size = int(x[np.argmax(probabilities)])
     
-    # generate grid_distance (again based on a prob distribution)
-    # corridors at least 2 px wide; no divisibility needed (the grid is padded up to maze_size)
-    grid_distances = list(range(2, max(2, maze_size // 7) + 1))
+    grid_distances = list(range(1, max(1, maze_size // 7) + 1))
 
     # Piecewise distribution function
     if not grid_distances:

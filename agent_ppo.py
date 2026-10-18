@@ -26,18 +26,19 @@ from maze_utils import raycaster_env, _fov_to_radians, _build_bsp_tree
 
 # Flags
 ACTION_DELAY_SECONDS = 0.0
-ROLLOUTS = 750
+ROLLOUTS = 3000
 SEED = 42
-MIN_ROLLOUT_STEPS = 75000 # must be positive
-PPO_EPOCHS = 16
+MIN_ROLLOUT_STEPS = 256 # must be positive
+PPO_EPOCHS = 8
 MINIBATCH_SIZE = 64
 TARGET_KL = 0.02
 LEARNING_RATE = 3e-4
 ENTROPY_COEF = 0.01
 CURRICULUM_ENABLED = True
 REWARD_DEBUG_EVERY = 20
+TURN_LIMIT_SUCCESS = 0.4  
 
-def _compute_gae(rewards, values, dones, next_value, gamma=0.99, lam=0.95): # advantages goes to loss
+def _compute_gae(rewards, values, dones, next_value, gamma=0.99, lam=0.95): 
     advantages = torch.zeros_like(rewards)
     next_advantage = torch.zeros((), dtype=values.dtype)
     for t in reversed(range(len(rewards))):
@@ -63,7 +64,7 @@ def _ppo_update(network, optimizer, ppo_parameters, states, actions, log_probs, 
     diagnostics = []
     stopped = False
 
-    # training loop, moved to a function
+    # PPO Training loop
     for epoch in range(PPO_EPOCHS):
         shuffled_indices = torch.randperm(len(states))
         for i in range(0, len(states), MINIBATCH_SIZE):
@@ -77,7 +78,7 @@ def _ppo_update(network, optimizer, ppo_parameters, states, actions, log_probs, 
                 stopped = True
                 break
 
-            # batched AI. This is what we are studying
+            # batched allows for better handling
             batch = shuffled_indices[i:i + MINIBATCH_SIZE]
             new_log_prob, entropy, batch_value = network.evaluate_actions(states[batch], actions[batch])
             probability_ratio = torch.exp(new_log_prob - log_probs[batch])
@@ -127,7 +128,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
     directory = Path(output_dir) if output_dir is not None else Path("runs") / f"agent_{agnt}_seed_{seed}_{time.time_ns()}"
     directory.mkdir(parents=True, exist_ok=True)
     config_path = directory / f"RunConfig_{agnt}.json"
-    x = 51
+    x = 0
     success_rate = 0.0
     episode_count = 0
     past = 0
@@ -176,7 +177,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
     buffered_advantages, buffered_returns = [], []
     buffer_turn_total = 0.0
     for _rollout in range(rollouts):
-
+        print(_rollout)
         # get training example
         start_point, end_point, maze_size, grid_distance, walls, pixel_grid = get_new_training_example(x, network.k, network.sd)
         robot_pos = np.array(start_point, dtype=np.float32)
@@ -187,12 +188,12 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
 
         # Initializations
         angle = float((7 * math.pi) / 4)
-        A_star_path = Normal_A_star_search(np.array(pixel_grid), list(start_point), list(end_point))
+        A_star_path = Normal_A_star_search(np.array(pixel_grid), [int(v) for v in start_point], [int(v) for v in np.floor(end_point)])
         total_turn_delta = 0.0
         episode_start = buffered_steps
         RegionsExplored = set()
 
-        start_region = None
+        start_region = goal_region = None
         if grid_distance > 0:
             start_region = tuple((np.floor(robot_pos / grid_distance) * grid_distance).tolist())
             goal_region = tuple((np.floor(end_point / grid_distance) * grid_distance).tolist())
@@ -212,11 +213,11 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
 
         for step in range(network.MaxSteps):
             done = False
+            distance_finish = float(np.linalg.norm(end_point - robot_pos))
             State = network.GetState(robot_pos, VARNumberOfRayCasts, BSP, network.RayOffset, network.FOV, angle, VARRayDistance, maze_size, end_point)
             lidar_seconds_this_rollout += network.time_cost
             rays_this_rollout += network.last_rays_cast
-            distance_finish = float(np.linalg.norm(end_point - robot_pos))
-
+            
             # Get action
             inference_start = time.perf_counter()
             Action, log_prob, value, LatentAction, _ = network.get_action_and_value(State)
@@ -228,6 +229,12 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             # params (old angle, angle, etc.)
             old_angle = float(angle)
             new_angle, step_size = float(Action[0]), float(Action[1])
+            # turn limit: no limit at success_rate 0, tightens to target_max_turn as the success rate rises
+            turn_limit = math.pi - (math.pi - VARtargetMaxTurn) * min(1.0, success_rate / TURN_LIMIT_SUCCESS)
+            turn = (new_angle - old_angle + math.pi) % (2 * math.pi) - math.pi
+            turn_excess = max(0.0, abs(turn) - turn_limit)    # how far past the limit the policy asked to turn
+            turn = max(-turn_limit, min(turn_limit, turn))
+            new_angle = (old_angle + turn + math.pi) % (2 * math.pi) - math.pi
 
             # Virtually update robot stats without directional floor bias.
             new_pos = (robot_pos + step_size * np.array([np.cos(new_angle), np.sin(new_angle)])).astype(np.float32)
@@ -244,6 +251,8 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             if region_tuple == start_region or region_tuple == goal_region:      
                 in_dead_end = False
             region_unexplored = region_tuple not in RegionsExplored
+            if region_unexplored:
+                RegionsExplored.add(region_tuple)
 
             # Get reward
             next_distance_finish = float(np.linalg.norm(end_point - new_pos))
@@ -254,7 +263,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             Reward, done, maze_solved = network.reward(
                 distance_progress, run_into_wall, in_dead_end, goal_distance,
                 region_unexplored, robot_pos, new_pos, step_size, success_rate,
-                old_angle, new_angle, maze_size, done
+                old_angle, new_angle, maze_size, done, turn_excess
             )
 
             episode_reward += Reward
@@ -287,7 +296,6 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
 
         # accuracy using A*
         ACCURACY = network.GetRobotAccuracy(np.asarray(A_star_path), np.asarray(robot_path))
-
         Episode_Payload = [episode_count, episode_reward, episode_length, int(maze_solved), success_rate,
                            network.EnergyUsed, len(RegionsExplored), "completed" if done else "partial",
                            penalty_sum, path_length, total_turn_delta, lidar_seconds_this_rollout,
@@ -350,4 +358,3 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
     torch.save({"model_state_dict": network.state_dict(), "config": config}, directory / f"Policy_{agnt}.pt")
     network.output_directory = str(directory)
     return network
-
