@@ -53,9 +53,17 @@ from agent_ppo import (
     _ppo_update,
     SEED,
     MIN_ROLLOUT_STEPS,
+    MIN_ROLLOUT_STEPS_LEARNING,
     LEARNING_RATE,
     CURRICULUM_ENABLED,
     TURN_LIMIT_SUCCESS,
+    CURRICULUM_WINDOW,
+    CURRICULUM_PROMOTE,
+    CURRICULUM_DEMOTE,
+    CURRICULUM_STAGES,
+    STALL_WINDOW,
+    STALL_MIN_DISPLACEMENT,
+    STALL_END_PENALTY,
 )
 
 # ---------------------------------------------------------------- look & feel
@@ -64,7 +72,7 @@ TEXT, DIM = (214, 220, 232), (128, 138, 158)
 ROBOT, TRAIL, GOAL, START = (255, 170, 40), (255, 214, 120), (70, 220, 120), (90, 150, 255)
 RAY_NEAR, RAY_MID, RAY_FAR, RAY_OFF = (255, 80, 70), (255, 210, 80), (70, 210, 255), (64, 70, 86)
 BAD, WARN, SEGMENT, REGION = (240, 70, 70), (255, 150, 40), (255, 200, 60), (30, 54, 50)
-OUTCOME_COLOURS = {"success": GOAL, "collision": BAD, "dead_end": WARN, "time_limit": DIM}
+OUTCOME_COLOURS = {"success": GOAL, "collision": BAD, "dead_end": WARN, "stalled": (190, 120, 255), "time_limit": DIM}
 MONO = "consolas,menlo,dejavusansmono,couriernew,monospace"
 
 SPEEDS = [1, 2, 5, 10, 20, 50, 100, 200, 500]     # steps per second
@@ -243,7 +251,8 @@ def _draw_panel(screen, layout, fonts, view, ui):
     row("mode", f"{view.mode}   {status}", WARN if ui.paused else TEXT)
     row("episode", f"#{view.episode}   step {view.step + 1}/{view.max_steps}")
     row("maze", f"{view.rows}x{view.cols}   block {view.grid_distance}")
-    row("curric.", f"x = {view.x}")
+    row("curric.", f"stage {view.stage}   x = {view.x}")
+    row("rolling", f"{view.rolling_success:.2f}  (last {view.rolling_n})   ramp {view.ramp_rate:.2f}")
     row("success", f"{view.success_rate:.3f}  ({view.past}/{view.past + view.not_past})")
     mean_steps = sum(view.recent_steps) / len(view.recent_steps) if view.recent_steps else 0.0
     row("steps/ep", f"{mean_steps:.1f}  (last {len(view.recent_steps)})")
@@ -263,7 +272,7 @@ def _draw_panel(screen, layout, fonts, view, ui):
     row("dead end", "YES" if view.dead_end else "no", WARN if view.dead_end else TEXT)
     row("blocks", f"{len(view.explored)} explored")
     if view.train:
-        row("ppo", f"buffer {view.buffered}/{MIN_ROLLOUT_STEPS}   updates {view.updates}")
+        row("ppo", f"buffer {view.buffered}/{view.rollout_target}   updates {view.updates}")
         row("last KL", "-" if view.last_kl is None else f"{view.last_kl:.4f}")
     y += 8
     screen.blit(fonts.small.render("recent episodes", True, DIM), (x, y))
@@ -313,7 +322,8 @@ def _new_view(train, mode, energy_budget):
         # numbers
         reward=0.0, episode_reward=0.0, energy_used=0.0, energy_budget=energy_budget, value=0.0,
         lidar_ms=0.0, rays_cast=0, min_ray=None, success_rate=0.0, past=0, not_past=0,
-        buffered=0, updates=0, last_kl=None,
+        buffered=0, updates=0, last_kl=None, rollout_target=MIN_ROLLOUT_STEPS,
+        stage=0, rolling_success=0.0, rolling_n=0, ramp_rate=0.0,
         # bookkeeping
         banner=None, finished=False, train=train, mode=mode,
         recent=deque(maxlen=60), recent_steps=deque(maxlen=50),
@@ -370,6 +380,7 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
     # ActorCritic.EnergyCost takes (VARRayDistance, maze_size). If reward() does not pass them on, the viewer supplies
     # them here, so actor_critic.py stays untouched. If reward() passes them, or EnergyCost no longer takes them,
     # this changes nothing.
+    reward_params = inspect.signature(network.reward).parameters
     energy_cost = network.EnergyCost
     energy_cost_needs_ray_args = "VARRayDistance" in inspect.signature(energy_cost).parameters
 
@@ -379,13 +390,20 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
     ctl = SimpleNamespace(skip=False, set_x=None)
     stages = curriculum_stage_starts(network.k.item(), network.sd.item())
 
+    def stage_of(x_value):
+        return max(i for i, start in enumerate(CURRICULUM_STAGES) if start <= x_value)
+
     def episodes():
         x = int(start_difficulty)
+        stage = stage_of(x)
         success_rate = 0.0
         episode_count = 0
         past = 0
         not_past = 0
-        capacity = MIN_ROLLOUT_STEPS + network.MaxSteps
+        recent_outcomes = deque(maxlen=CURRICULUM_WINDOW)   # same bookkeeping as StartAgent
+        stage_outcomes = deque(maxlen=CURRICULUM_WINDOW)
+        ramp_rate = 0.0
+        capacity = max(MIN_ROLLOUT_STEPS, MIN_ROLLOUT_STEPS_LEARNING) + network.MaxSteps
         network.clear_memory(capacity)
         buffered_steps = 0
         buffered_advantages, buffered_returns = [], []
@@ -404,6 +422,8 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
         for _rollout in episode_ids:
             if ctl.set_x is not None:                       # [ / ] keys
                 x, ctl.set_x = ctl.set_x, None
+                stage = stage_of(x)
+                stage_outcomes.clear()
             ctl.skip = False
 
             # get training example
@@ -420,6 +440,7 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
             episode_start = buffered_steps
             RegionsExplored = set()
             PixelVisits = np.zeros(np.asarray(pixel_grid).shape)    # how often each pixel has been entered this episode
+            stalled = False
 
             start_region = goal_region = None
             if grid_distance > 0:
@@ -478,7 +499,7 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
                 old_angle = float(angle)
                 new_angle, step_size = float(Action[0]), float(Action[1])
                 # turn limit: no limit at success_rate 0, tightens to target_max_turn as the success rate rises
-                turn_limit = math.pi - (math.pi - VARtargetMaxTurn) * min(1.0, success_rate / TURN_LIMIT_SUCCESS)
+                turn_limit = math.pi - (math.pi - VARtargetMaxTurn) * min(1.0, ramp_rate / TURN_LIMIT_SUCCESS)
                 turn = (new_angle - old_angle + math.pi) % (2 * math.pi) - math.pi
                 turn_excess = max(0.0, abs(turn) - turn_limit)    # how far past the limit the policy asked to turn
                 turn = max(-turn_limit, min(turn_limit, turn))
@@ -513,12 +534,22 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
                 # nearest wall the LiDAR saw this step, in pixels (rays outside the FOV hold the max distance, so they never win)
                 min_ray_px = min(State[:int(VARNumberOfRayCasts)]) * max_ray
 
-                Reward, done, maze_solved = network.reward(
-                    distance_progress, run_into_wall, in_dead_end, goal_distance,
-                    region_unexplored, robot_pos, new_pos, step_size, success_rate,
-                    old_angle, new_angle, maze_size, done, turn_excess, min_ray_px
+                # called by keyword, so it keeps working however reward()'s parameters are ordered; the optional ones are
+                # only passed if reward() has them
+                reward_kwargs = dict(
+                    distance_progress=distance_progress, run_into_wall=run_into_wall, in_dead_end=in_dead_end,
+                    distance_finish=goal_distance, region_unexplored=region_unexplored, robot_pos=robot_pos,
+                    new_pos=new_pos, step_size=step_size, success_rate=ramp_rate, angle=old_angle,
+                    new_angle=new_angle, maze_size=maze_size, done=done, turn_excess=turn_excess,
+                    min_ray_px=min_ray_px, VARRayDistance=VARRayDistance, revisits=current_pixel_visits,
                 )
-                Reward -= 0.02 * current_pixel_visits                   # revisit penalty, same as StartAgent
+                Reward, done, maze_solved = network.reward(**{k: v for k, v in reward_kwargs.items() if k in reward_params})
+
+                # end hopeless episodes early: almost no net movement over the last STALL_WINDOW steps
+                if not done and len(robot_path) > STALL_WINDOW and \
+                        np.linalg.norm(new_pos - robot_path[-1 - STALL_WINDOW]) < STALL_MIN_DISPLACEMENT:
+                    Reward -= STALL_END_PENALTY
+                    done, stalled = True, True
                 episode_reward += Reward
                 episode_length += 1
 
@@ -539,7 +570,7 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
                 # update the robot (angle / position)
                 robot_pos, angle = new_pos, new_angle
                 if done:
-                    termination = "success" if maze_solved else ("collision" if run_into_wall else "dead_end")
+                    termination = "success" if maze_solved else ("collision" if run_into_wall else ("stalled" if stalled else "dead_end"))
                     break
 
             if skipped:
@@ -548,15 +579,29 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
 
             past += int(maze_solved)
             not_past += int(not maze_solved)
-            if maze_solved and CURRICULUM_ENABLED:
-                x += 1
-
             success_rate = past / (past + not_past)
+
+            recent_outcomes.append(int(maze_solved))
+            rolling_success = sum(recent_outcomes) / len(recent_outcomes)
+            if len(recent_outcomes) == CURRICULUM_WINDOW:
+                ramp_rate = max(ramp_rate, rolling_success)
+            if CURRICULUM_ENABLED:   # promote / demote on the success rate of the last CURRICULUM_WINDOW episodes at this stage
+                stage_outcomes.append(int(maze_solved))
+                if len(stage_outcomes) == CURRICULUM_WINDOW:
+                    stage_rate = sum(stage_outcomes) / CURRICULUM_WINDOW
+                    if stage_rate >= CURRICULUM_PROMOTE and stage < len(CURRICULUM_STAGES) - 1:
+                        stage += 1
+                        stage_outcomes.clear()
+                    elif stage_rate <= CURRICULUM_DEMOTE and stage > 0:
+                        stage -= 1
+                        stage_outcomes.clear()
+                    x = CURRICULUM_STAGES[stage]
             episode_count += 1
 
             view.update(
                 pos=robot_pos.copy(), angle=angle, rays=None, goal_distance=float(np.linalg.norm(end_point - robot_pos)),
-                success_rate=success_rate, past=past, not_past=not_past, x=x,
+                success_rate=success_rate, past=past, not_past=not_past, x=x, stage=stage,
+                rolling_success=rolling_success, rolling_n=len(recent_outcomes), ramp_rate=ramp_rate,
                 banner=(termination.replace("_", " ").upper(), OUTCOME_COLOURS[termination]),
             )
             view.recent.append(termination)
@@ -581,8 +626,9 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
             buffered_returns.append(returns)
             buffer_turn_total += total_turn_delta
             is_last = rollouts is not None and _rollout == rollouts - 1
-            if buffered_steps < MIN_ROLLOUT_STEPS and not is_last:
-                view.update(buffered=buffered_steps)
+            rollout_target = MIN_ROLLOUT_STEPS_LEARNING if sum(recent_outcomes) > 0 else MIN_ROLLOUT_STEPS
+            if buffered_steps < rollout_target and not is_last:
+                view.update(buffered=buffered_steps, rollout_target=rollout_target)
                 continue
 
             # TRAINING PPO LOOP
@@ -604,7 +650,7 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
                     network.log_w_turn.clamp_(math.log(1e-4), math.log(10.0))
 
             network.clear_memory(capacity) # return to next episode
-            network.set_max_step(success_rate) # buffer is empty, so it is safe to change the step cap now
+            network.set_max_step(ramp_rate) # buffer is empty, so it is safe to change the step cap now
             buffered_steps = 0
             buffered_advantages, buffered_returns = [], []
             buffer_turn_total = 0.0

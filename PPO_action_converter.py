@@ -16,13 +16,12 @@ def ConvertRobotAction(Action: list[float], done) -> list[list[int]]:
         VLeft = int(VBase * (1.0 - 2.0 * (min(1.0, abs(dir_)/(math.pi/4)))))
         VRight = VBase
 
+    Penalty = (VLeft**2 + VRight**2) / (2 * VBase**2) * float(step_size)
+
     if VLeft < 0:
         VLeft = int(round((~VLeft & 255) + 1))
     if VRight < 0:
         VRight = int(round((~VRight & 255) + 1))
-
-    # calculate energy penalty from velocities
-    Penalty = (VLeft**2 + VRight**2) / (2 * VBase**2) * float(step_size)
     step_bytes = list(struct.pack('<i', int(round(step_size))))
   
     Payload = (VLeft - 127.5) / 127.5, (VRight - 127.5) / 127.5, step_bytes
@@ -30,7 +29,3 @@ def ConvertRobotAction(Action: list[float], done) -> list[list[int]]:
     LWP3Packet.append(Payload)
 
     return LWP3Packet, Penalty
-
-
-
-

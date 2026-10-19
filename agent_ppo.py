@@ -12,6 +12,7 @@ from RunIntoWall import RunIntoWall
 from agent_viewer import Dashboard
 import sys
 import random
+from collections import deque
 from pathlib import Path
 
 from actor_critic import (
@@ -24,6 +25,16 @@ from actor_critic import (
     MAX_STEP_START,
     MAX_STEP_END,
     STEP_RAMP_SUCCESS,
+    REWARD_CLIP,
+    STEP_TIME_COST,
+    CLEARANCE_WEIGHT,
+    CLEARANCE_DISTANCE,
+    VISIT_PENALTY,
+    VISIT_CAP,
+    EXPLORE_BONUS,
+    STALL_STEP_SIZE,
+    STALL_STEP_PENALTY,
+    OVER_BUDGET_PENALTY,
 )
 from maze_utils import raycaster_env, _fov_to_radians, _build_bsp_tree
 
@@ -40,6 +51,15 @@ ENTROPY_COEF = 0.01
 CURRICULUM_ENABLED = True
 REWARD_DEBUG_EVERY = 20
 TURN_LIMIT_SUCCESS = 0.4  
+MIN_ROLLOUT_STEPS_LEARNING = 512   # buffer size once the agent has started to succeed (MIN_ROLLOUT_STEPS applies before that)
+CURRICULUM_WINDOW = 50             # episodes in the rolling success window
+CURRICULUM_PROMOTE = 0.6           # rolling success needed to move up a stage
+CURRICULUM_DEMOTE = 0.1            # rolling success at or below this moves back down a stage
+CURRICULUM_STAGES = [0, 7, 20, 51, 54, 148, 403, 1096]   # x where the maze changes (see get_new_training_example)
+STALL_WINDOW = 20                  # end the episode if the robot moved less than STALL_MIN_DISPLACEMENT px ...
+STALL_MIN_DISPLACEMENT = 2.0       # ... during the last STALL_WINDOW steps
+STALL_END_PENALTY = 1.0
+SUMMARY_SUCCESS_WINDOW = 100       # episodes the end-of-run summary averages over
 
 def _compute_gae(rewards, values, dones, next_value, gamma=0.99, lam=0.95): 
     advantages = torch.zeros_like(rewards)
@@ -121,6 +141,41 @@ def _ppo_update(network, optimizer, ppo_parameters, states, actions, log_probs, 
 
     return diagnostics, final_kl, stopped or final_kl > TARGET_KL, explained_variance
 
+def _write_summary(path, history, milestones, config, start_time):
+    # Study summary: rewritten after every PPO update (so an interrupted run still has one) and at the end.
+    def mean(values):
+        values = [v for v in values if v is not None and math.isfinite(v)]
+        return float(np.mean(values)) if values else None
+
+    wins = [h for h in history if h["success"]]
+    last = history[-SUMMARY_SUCCESS_WINDOW:]
+    last_wins = [h for h in last if h["success"]]
+    win_energy = sorted(h["energy"] for h in wins)
+    summary = dict(
+        episodes=len(history), wall_seconds=time.perf_counter() - start_time,
+        first_success_episode=milestones["first_success"],
+        episodes_to_rolling_success_50=milestones["half_rolling"],
+        highest_stage=milestones["max_stage"], final_stage=milestones["stage"],
+        last_window_success_rate=mean([h["success"] for h in last]),
+        last_window_path_efficiency=mean([h["spl"] for h in last]),
+        last_window_accuracy=mean([h["accuracy"] for h in last_wins]),
+        last_window_energy_per_success=mean([h["energy"] for h in last_wins]),
+        last_window_energy_per_length=mean([h["energy_per_length"] for h in last_wins]),
+        last_window_rays_per_episode=mean([h["rays"] for h in last]),
+        last_window_steps_per_episode=mean([h["steps"] for h in last]),
+        total_energy=sum(h["energy"] for h in history), total_rays=sum(h["rays"] for h in history),
+        total_sensing_units=sum(h["sensing"] for h in history),
+        total_lidar_seconds=sum(h["lidar_seconds"] for h in history),
+        total_inference_seconds=sum(h["inference_seconds"] for h in history),
+        successes=len(wins),
+        success_energy_median=float(np.median(win_energy)) if win_energy else None,
+        success_energy_p90=float(np.percentile(win_energy, 90)) if win_energy else None,
+        suggested_energy_budget=round(2.0 * float(np.median(win_energy)), 1) if len(win_energy) >= 5 else None,
+        param_count=config["param_count"], actor_param_count=config["actor_param_count"],
+        actor_macs_per_inference=config["actor_macs_per_inference"],
+    )
+    path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
 # main
 def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARWeightInitType, VARtargetMaxTurn, agnt, VARFOV, VARRayDistance, *, seed=SEED, rollouts=None, output_dir=None):
     random.seed(seed)
@@ -136,11 +191,18 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
     episode_count = 0
     past = 0
     not_past = 0
+    stage = 0                                   # curriculum stage; x = CURRICULUM_STAGES[stage]
+    recent_outcomes = deque(maxlen=CURRICULUM_WINDOW)   # last episodes, for the ramps and the rollout size
+    stage_outcomes = deque(maxlen=CURRICULUM_WINDOW)    # episodes at the current stage, for promotion / demotion
+    ramp_rate = 0.0     # best rolling success so far; drives the step cap, turn limit and energy weight (never goes down)
+    history = []        # one dict per episode, for the summary file
+    milestones = dict(first_success=None, half_rolling=None, max_stage=0, stage=0)
+    start_time = time.perf_counter()
 
     # classes
     network = ActorCritic(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, VARFOV, NNinputs)
     network.InitializeWeights(VARWeightInitType)
-    network.set_max_step(success_rate)
+    network.set_max_step(ramp_rate)
 
     # config
     ppo_parameters = [p for name, p in network.named_parameters() if p.requires_grad and name != "log_w_turn"]
@@ -158,6 +220,17 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
                   ray_offset=network.RayOffset.item(), weight_init=VARWeightInitType,
                   max_steps=network.MaxSteps, min_rollout_steps=MIN_ROLLOUT_STEPS,
                   max_step_start=MAX_STEP_START, max_step_end=MAX_STEP_END, step_ramp_success=STEP_RAMP_SUCCESS,
+                  min_rollout_steps_learning=MIN_ROLLOUT_STEPS_LEARNING, curriculum_window=CURRICULUM_WINDOW,
+                  curriculum_promote=CURRICULUM_PROMOTE, curriculum_demote=CURRICULUM_DEMOTE,
+                  curriculum_stages=CURRICULUM_STAGES, stall_window=STALL_WINDOW,
+                  stall_min_displacement=STALL_MIN_DISPLACEMENT, stall_end_penalty=STALL_END_PENALTY,
+                  reward_clip=REWARD_CLIP, step_time_cost=STEP_TIME_COST, clearance_weight=CLEARANCE_WEIGHT,
+                  clearance_distance=CLEARANCE_DISTANCE, visit_penalty=VISIT_PENALTY, visit_cap=VISIT_CAP,
+                  explore_bonus=EXPLORE_BONUS, stall_step_size=STALL_STEP_SIZE, stall_step_penalty=STALL_STEP_PENALTY,
+                  over_budget_penalty=OVER_BUDGET_PENALTY,
+                  param_count=sum(p.numel() for p in network.parameters()),
+                  actor_param_count=sum(p.numel() for m in (network.act1, network.act2, network.out) for p in m.parameters()),
+                  actor_macs_per_inference=int(network.inputs * NNh1 + NNh1 * NNh2 + NNh2 * 2),
                   ppo_epochs=PPO_EPOCHS, minibatch_size=MINIBATCH_SIZE, target_kl=TARGET_KL,
                   learning_rate=LEARNING_RATE, entropy_coef=ENTROPY_COEF,
                   dead_end_terminal=DEAD_END_IS_TERMINAL, torch_version=torch.__version__,
@@ -166,21 +239,26 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
     config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
     headers = {
         "EpisodeData": ["episode", "reward", "steps", "success", "success_rate", "raw_energy", "regions", "status",
-                        "penalty_sum", "path_length", "turn_radians", "lidar_seconds", "inference_seconds", "rays_cast", "termination"],
+                        "penalty_sum", "path_length", "turn_radians", "lidar_seconds", "inference_seconds", "rays_cast", "termination",
+                        "maze_size", "difficulty_x", "stage", "optimal_length", "path_efficiency", "accuracy", "energy_per_length",
+                        "sensing_units", "max_step_cap", "revisit_steps", "elapsed_seconds", "rolling_success"],
         "ActionData": ["angle", "step", "value", "reward", "total_penalty", "raw_energy", "energy_penalty", "turn_penalty", "time_penalty"],
         "TrainingData": ["episode_count", "success_rate", "total_loss", "actor_loss", "critic_huber_loss", "bounded_entropy_mc", "advantage_mean", "kl_before_step", "clip_fraction", "grad_norm_before_clip"],
-        "UpdateData": ["episode_count", "transitions", "minibatch_updates", "final_kl", "kl_stopped", "explained_variance", "training_seconds"],
+        "UpdateData": ["episode_count", "transitions", "minibatch_updates", "final_kl", "kl_stopped", "explained_variance", "training_seconds",
+                       "episodes_in_buffer", "mean_episode_reward", "mean_episode_steps", "policy_entropy", "log_std_angle", "log_std_step",
+                       "rolling_success", "ramp_rate", "max_step_cap", "stage", "rollout_target"],
     }
 
     for name, header in headers.items():
         with open(directory / f"{name}_{test}{agnt}.csv", "x", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(header)
 
-    capacity = MIN_ROLLOUT_STEPS + network.MaxSteps
+    capacity = max(MIN_ROLLOUT_STEPS, MIN_ROLLOUT_STEPS_LEARNING) + network.MaxSteps
     network.clear_memory(capacity)
     buffered_steps = 0
     buffered_advantages, buffered_returns = [], []
     buffer_turn_total = 0.0
+    buffer_episode_rewards, buffer_episode_steps = [], []
     for _rollout in range(rollouts):
         print(_rollout)
         # get training example
@@ -190,14 +268,21 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
         walls_np, BSP = _build_bsp_tree(walls)
         robot_pos = robot_pos + 0.5
         end_point = end_point + 0.5
+        episode_x, episode_stage = x, stage
 
         # Initializations
         angle = float((7 * math.pi) / 4)
         A_star_path = Normal_A_star_search(np.array(pixel_grid), [int(v) for v in start_point], [int(v) for v in np.floor(end_point)])
+        A_star_points = np.asarray(A_star_path, dtype=float)
+        optimal_length = float(np.linalg.norm(np.diff(A_star_points, axis=0), axis=1).sum()) if len(A_star_points) > 1 else 0.0
         total_turn_delta = 0.0
         episode_start = buffered_steps
         RegionsExplored = set()
-        PixelVisits = np.zeros((maze_size, maze_size))
+        PixelVisits = np.zeros(np.asarray(pixel_grid).shape)    # how often each pixel has been entered this episode
+        revisit_steps = 0
+        sensing_units = 0.0
+        ray_range = float(maze_size if VARRayDistance is None else VARRayDistance)
+        stalled = False
 
         start_region = goal_region = None
         if grid_distance > 0:
@@ -220,9 +305,12 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
         for step in range(network.MaxSteps):
             done = False
             distance_finish = float(np.linalg.norm(end_point - robot_pos))
+            lidar_start = time.perf_counter()
             State = network.GetState(robot_pos, VARNumberOfRayCasts, BSP, network.RayOffset, network.FOV, angle, VARRayDistance, maze_size, end_point)
+            lidar_seconds_this_rollout += time.perf_counter() - lidar_start
             
             rays_this_rollout += network.last_rays_cast
+            sensing_units += network.last_rays_cast * ray_range / 10.0    # rays x range, relative to a 10 px reference
             
             # Get action
             inference_start = time.perf_counter()
@@ -237,7 +325,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             new_angle, step_size = float(Action[0]), float(Action[1])
 
             # added a way for early training for energy efficiency to 
-            turn_limit = math.pi - (math.pi - VARtargetMaxTurn) * min(1.0, success_rate / TURN_LIMIT_SUCCESS)
+            turn_limit = math.pi - (math.pi - VARtargetMaxTurn) * min(1.0, ramp_rate / TURN_LIMIT_SUCCESS)
             turn = (new_angle - old_angle + math.pi) % (2 * math.pi) - math.pi
             turn_excess = max(0.0, abs(turn) - turn_limit)    # how far past the limit the policy asked to turn
             turn = max(-turn_limit, min(turn_limit, turn))
@@ -245,7 +333,10 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
 
             # Virtually update robot stats without directional floor bias.
             new_pos = (robot_pos + step_size * np.array([np.cos(new_angle), np.sin(new_angle)])).astype(np.float32)
-            current_pixel_visits = PixelVisits[new_pos]
+            visit_pixel = tuple(int(np.clip(np.floor(new_pos[i]), 0, PixelVisits.shape[i] - 1)) for i in range(2))
+            current_pixel_visits = PixelVisits[visit_pixel]         # times this pixel was entered before now
+            PixelVisits[visit_pixel] += 1
+            revisit_steps += int(current_pixel_visits > 0)
             robot_path.append(new_pos.copy())
             path_length += float(np.linalg.norm(new_pos - robot_pos))
             angle_diff_step = abs((new_angle - old_angle + math.pi) % (2 * math.pi) - math.pi)
@@ -268,14 +359,20 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             in_goal_pixel = bool(np.all(np.floor(new_pos / grid_distance) == np.floor(end_point / grid_distance)))
             goal_distance = 0.0 if in_goal_pixel else next_distance_finish
 
-            rays = State[0]
-            min_ray_px = min(rays[:network.last_rays_cast]) * VARRayDistance
+            # nearest wall the LiDAR saw this step, in pixels (rays outside the FOV hold the max distance, so they never win)
+            min_ray_px = min(State[:int(VARNumberOfRayCasts)]) * ray_range
 
-            Reward, done, maze_solved = - 0.02 * current_pixel_visits + network.reward(
+            Reward, done, maze_solved = network.reward(
                 distance_progress, run_into_wall, in_dead_end, goal_distance,
-                region_unexplored, robot_pos, new_pos, step_size, success_rate,
-                old_angle, new_angle, maze_size, done, turn_excess, min_ray_px
+                region_unexplored, VARRayDistance, new_pos, step_size, ramp_rate,
+                old_angle, new_angle, maze_size, done, min_ray_px, turn_excess, current_pixel_visits
             )
+
+            # end hopeless episodes early: almost no net movement over the last STALL_WINDOW steps
+            if not done and len(robot_path) > STALL_WINDOW and \
+                    np.linalg.norm(new_pos - robot_path[-1 - STALL_WINDOW]) < STALL_MIN_DISPLACEMENT:
+                Reward -= STALL_END_PENALTY
+                done, stalled = True, True
 
             episode_reward += Reward
             episode_length += 1
@@ -293,24 +390,53 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             # update the robot (angle / position)
             robot_pos, angle = new_pos, new_angle
             if done:
-                termination = "success" if maze_solved else ("collision" if run_into_wall else "dead_end")
+                termination = "success" if maze_solved else ("collision" if run_into_wall else ("stalled" if stalled else "dead_end"))
                 break
             if ACTION_DELAY_SECONDS > 0:
                 time.sleep(ACTION_DELAY_SECONDS)
 
         past += int(maze_solved)
         not_past += int(not maze_solved)
-        if maze_solved and CURRICULUM_ENABLED: # added a ciriculum enabler to track early stability
-            x += 1
+        success_rate = past / (past + not_past) # lifetime success rate (logged; the ramps use ramp_rate)
 
-        success_rate = past / (past + not_past) # sucessrate (currently 0 in early training)
+        # rolling window: drives the ramps, the rollout size and the curriculum
+        recent_outcomes.append(int(maze_solved))
+        rolling_success = sum(recent_outcomes) / len(recent_outcomes)
+        if len(recent_outcomes) == CURRICULUM_WINDOW:
+            ramp_rate = max(ramp_rate, rolling_success)
+            if milestones["half_rolling"] is None and rolling_success >= 0.5:
+                milestones["half_rolling"] = episode_count
+        if maze_solved and milestones["first_success"] is None:
+            milestones["first_success"] = episode_count
+        if CURRICULUM_ENABLED:   # promote / demote on the success rate of the last CURRICULUM_WINDOW episodes at this stage
+            stage_outcomes.append(int(maze_solved))
+            if len(stage_outcomes) == CURRICULUM_WINDOW:
+                stage_rate = sum(stage_outcomes) / CURRICULUM_WINDOW
+                if stage_rate >= CURRICULUM_PROMOTE and stage < len(CURRICULUM_STAGES) - 1:
+                    stage += 1
+                    stage_outcomes.clear()
+                elif stage_rate <= CURRICULUM_DEMOTE and stage > 0:
+                    stage -= 1
+                    stage_outcomes.clear()
+                x = CURRICULUM_STAGES[stage]
+                milestones["max_stage"] = max(milestones["max_stage"], stage)
+                milestones["stage"] = stage
 
         # accuracy using A*
         ACCURACY = network.GetRobotAccuracy(np.asarray(A_star_path), np.asarray(robot_path))
+        path_efficiency = min(1.0, optimal_length / max(path_length, 1e-6)) if maze_solved else 0.0   # success-weighted shortest/actual path
+        energy_per_length = network.EnergyUsed / max(path_length, 1e-6)
+        history.append(dict(success=int(maze_solved), spl=path_efficiency, energy=float(network.EnergyUsed), accuracy=float(ACCURACY),
+                            energy_per_length=energy_per_length, rays=rays_this_rollout, steps=episode_length, sensing=sensing_units,
+                            lidar_seconds=lidar_seconds_this_rollout, inference_seconds=inference_seconds))
+        buffer_episode_rewards.append(episode_reward)
+        buffer_episode_steps.append(episode_length)
         Episode_Payload = [episode_count, episode_reward, episode_length, int(maze_solved), success_rate,
                            network.EnergyUsed, len(RegionsExplored), "completed" if done else "partial",
                            penalty_sum, path_length, total_turn_delta, lidar_seconds_this_rollout,
-                           inference_seconds, rays_this_rollout, termination]
+                           inference_seconds, rays_this_rollout, termination,
+                           maze_size, episode_x, episode_stage, optimal_length, path_efficiency, ACCURACY, energy_per_length,
+                           sensing_units, network.max_step, revisit_steps, time.perf_counter() - start_time, rolling_success]
 
         # Log data
         network.LogDataToCSV(Episode_Payload, None, None, "ep", agnt, directory, test)
@@ -331,7 +457,8 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
         buffered_advantages.append(advantages)
         buffered_returns.append(returns)
         buffer_turn_total += total_turn_delta
-        if buffered_steps < MIN_ROLLOUT_STEPS and _rollout != rollouts - 1:
+        rollout_target = MIN_ROLLOUT_STEPS_LEARNING if sum(recent_outcomes) > 0 else MIN_ROLLOUT_STEPS
+        if buffered_steps < rollout_target and _rollout != rollouts - 1:
             continue
 
         # TRAINING PPO LOOP
@@ -345,7 +472,11 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             network.LogDataToCSV([episode_count, success_rate] + row, None, None, "trg", agnt, directory, test)
 
         with open(directory / f"UpdateData_{test}{agnt}.csv", "a", newline="", encoding="utf-8") as f:
-            csv.writer(f).writerow([episode_count, buffered_steps, len(diagnostics), final_kl, int(kl_stopped), explained_variance, training_seconds])
+            csv.writer(f).writerow([episode_count, buffered_steps, len(diagnostics), final_kl, int(kl_stopped), explained_variance, training_seconds,
+                                    len(buffer_episode_rewards), float(np.mean(buffer_episode_rewards)), float(np.mean(buffer_episode_steps)),
+                                    float(np.mean([row[3] for row in diagnostics])) if diagnostics else None,
+                                    float(network.log_std[0]), float(network.log_std[1]), rolling_success, ramp_rate,
+                                    network.max_step, stage, rollout_target])
 
         # Update weights adam
         if w_optimizer is not None:
@@ -358,15 +489,18 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
                 network.log_w_turn.clamp_(math.log(1e-4), math.log(10.0))
 
         if REWARD_DEBUG_EVERY and (episode_count % REWARD_DEBUG_EVERY == 0 or _rollout == rollouts - 1):
-            print(f"episode={episode_count} success={success_rate:.3f} steps={buffered_steps} KL={final_kl:.4f}")
+            print(f"episode={episode_count} success={success_rate:.3f} rolling={rolling_success:.2f} stage={stage} steps={buffered_steps} KL={final_kl:.4f}")
 
         network.clear_memory(capacity) # return to next episode
-        network.set_max_step(success_rate) # buffer is empty, so it is safe to change the step cap now
+        network.set_max_step(ramp_rate) # buffer is empty, so it is safe to change the step cap now
         buffered_steps = 0
         buffered_advantages, buffered_returns = [], []
         buffer_turn_total = 0.0
+        buffer_episode_rewards, buffer_episode_steps = [], []
+        _write_summary(directory / f"Summary_{test}{agnt}.json", history, milestones, config, start_time)
 
     # added a way to save the model's state
     torch.save({"model_state_dict": network.state_dict(), "config": config, "max_step": network.max_step}, directory / f"Policy_{agnt}.pt")
     network.output_directory = str(directory)
+    _write_summary(directory / f"Summary_{test}{agnt}.json", history, milestones, config, start_time)
     return network

@@ -25,6 +25,19 @@ MAX_STEP_START = 1.5      # largest step (px) the policy can take at 0% success
 MAX_STEP_END = 5.0        # largest step (px) once success_rate >= STEP_RAMP_SUCCESS
 STEP_RAMP_SUCCESS = 0.4
 
+# Reward shaping. Every per-step term below is small next to the terminal rewards (+10 goal, -5 collision / dead end),
+# and the shaped part of a step is clipped to +-REWARD_CLIP, so no single term can dominate the returns.
+REWARD_CLIP = 1.0
+STEP_TIME_COST = 0.01       # lost every step, whatever the robot does
+CLEARANCE_WEIGHT = 0.05     # penalty when the nearest LiDAR hit is closer than CLEARANCE_DISTANCE px
+CLEARANCE_DISTANCE = 1.5
+VISIT_PENALTY = 0.02        # per earlier visit of the pixel the robot moved into ...
+VISIT_CAP = 5               # ... counting at most this many visits (so at most 0.1 per step)
+EXPLORE_BONUS = 0.1         # first time a block is entered
+STALL_STEP_SIZE = 0.25      # a step shorter than this counts as standing still ...
+STALL_STEP_PENALTY = 0.2    # ... and costs this much (was 2.0)
+OVER_BUDGET_PENALTY = 0.2   # per step once the energy budget is used up (was 1.0)
+
 class ActorCritic(nn.Module):
     def __init__(self, h1, h2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, VARFOV, inputs, action_dim=2):
         super().__init__()
@@ -217,7 +230,9 @@ class ActorCritic(nn.Module):
         compute_time = float(0.002 * self.last_rays_cast * (max_distance / 10) ** 1)
         self.last_raw_energy = raw_energy
 
-        energy_scale = self.VARAllowedEnergy / self.MaxSteps
+        # normalised by the maze size, like the progress reward, so the energy penalty is a fixed fraction of what a
+        # straight step toward the goal earns (and does not change when the energy budget is changed)
+        energy_scale = max(float(maze_size), 1e-6)
         self.last_energy_component = float(c1 * raw_energy / energy_scale)
         self.last_turn_component = float(c2 * turn_cost)
         self.last_time_component = float(c3 * compute_time)
@@ -226,7 +241,7 @@ class ActorCritic(nn.Module):
         )
         return self.last_total_penalty
 
-    def reward(self, distance_progress, run_into_wall, in_dead_end, distance_finish, region_unexplored, robot_pos, new_pos, step_size, success_rate, angle, new_angle, maze_size, done, turn_excess=0.0, min_ray_px):
+    def reward(self, distance_progress, run_into_wall, in_dead_end, distance_finish, region_unexplored, VARRayDistance, new_pos, step_size, success_rate, angle, new_angle, maze_size, done, min_ray_px, turn_excess=0.0, revisits=0):
         goal_reached = distance_finish < 0.5
 
         failed_by_collision = bool(run_into_wall)
@@ -236,7 +251,7 @@ class ActorCritic(nn.Module):
 
         total_penalty_energy = self.EnergyCost(
             angle, step_size, new_angle, action_done,
-            ENERGY_REWARD_WEIGHT * min(1.0, success_rate / 0.4), TURN_REWARD_WEIGHT, TIME_REWARD_WEIGHT
+            ENERGY_REWARD_WEIGHT * min(1.0, success_rate / 0.4), TURN_REWARD_WEIGHT, TIME_REWARD_WEIGHT, VARRayDistance, maze_size
         )
 
         excess_penalty = TURN_EXCESS_WEIGHT * turn_excess
@@ -246,7 +261,10 @@ class ActorCritic(nn.Module):
 
         self.EnergyUsed += self.last_raw_energy
         safe_maze_size = max(float(maze_size), 1e-6)
-        reward = 1.0 * (distance_progress / safe_maze_size) - 0.01 - total_penalty_energy -0.05 * max(0, 1 - min_ray_px / 1.5)
+        reward = (1.0 * (distance_progress / safe_maze_size) - STEP_TIME_COST - total_penalty_energy
+                  - CLEARANCE_WEIGHT * max(0.0, 1.0 - min_ray_px / CLEARANCE_DISTANCE)
+                  - VISIT_PENALTY * min(revisits, VISIT_CAP))
+        reward = max(-REWARD_CLIP, min(REWARD_CLIP, reward))
         
         if failed_by_collision:
             return float(reward - 5.0), True, False
@@ -255,13 +273,13 @@ class ActorCritic(nn.Module):
         if in_dead_end:
             return float(reward - 5.0), DEAD_END_IS_TERMINAL, False
         if self.EnergyUsed > self.VARAllowedEnergy:
-            reward -= 1.0
+            reward -= OVER_BUDGET_PENALTY
         if region_unexplored:
-            reward += 0.1
-        if step_size < 0.25:
-            reward -= 2.0
+            reward += EXPLORE_BONUS
+        if step_size < STALL_STEP_SIZE:
+            reward -= STALL_STEP_PENALTY
         
-        return float(reward), False, False
+        return float(max(-REWARD_CLIP, min(REWARD_CLIP, reward))), False, False
 
     def InitializeWeights(self, Type):
         for module in self.modules():
@@ -309,7 +327,7 @@ class ActorCritic(nn.Module):
             return float("inf")
         return float(dtw_distance / len(alignment_path))
     
-    @torch.no_grad()
+    @staticmethod
     def wrap(a):
         return (a + math.pi) % (2 * math.pi) - math.pi
     
