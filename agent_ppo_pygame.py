@@ -18,7 +18,7 @@ How it relates to agent_ppo.py
 Usage
     from main.py (same arguments as StartAgent, minus nothing):
         from agent_ppo_pygame import StartViewer
-        StartViewer("test", 48, 24, 24, 9000, 29, "orth", 0.5, 1, 360, None)
+        StartViewer("test", 48, 24, 24, 9000, 34, "orth", 0.5, 1, 360, None)
     or from a terminal in the project folder:
         python agent_ppo_pygame.py                              train and watch live
         python agent_ppo_pygame.py --start-x 51                 skip the empty-arena stage
@@ -29,6 +29,8 @@ Keys
     S new maze       [ / ] curriculum stage down / up (new maze)
     L rays   T trail   G block grid   W wall segments   E explored blocks   H help   P screenshot   Q / Esc quit
 """
+import functools
+import inspect
 import itertools
 import math
 import random
@@ -255,7 +257,7 @@ def _draw_panel(screen, layout, fonts, view, ui):
     row("reward", f"{view.reward:+.3f}   ep {view.episode_reward:+.2f}")
     row("energy", f"{view.energy_used:.1f} / {view.energy_budget:.0f}")
     row("value", f"{view.value:+.3f}")
-    row("lidar", f"{view.rays_cast} rays  {view.lidar_ms:.2f} ms")
+    row("lidar", f"{view.rays_cast} rays")
     row("nearest", "-" if view.min_ray is None else f"{view.min_ray:.2f} px")
     row("wall hit", "YES" if view.collision else "no", BAD if view.collision else TEXT)
     row("dead end", "YES" if view.dead_end else "no", WARN if view.dead_end else TEXT)
@@ -356,9 +358,20 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
     network.InitializeWeights(VARWeightInitType)
     if checkpoint is not None:
         network.load_state_dict(checkpoint["model_state_dict"])
+        if "max_step" in checkpoint:                        # the step cap the policy finished training with
+            network.max_step = float(checkpoint["max_step"])
+            network.step_scale = network.max_step / 2.0
+    else:
+        network.set_max_step(0.0)                           # same as StartAgent
     ppo_parameters = [p for name, p in network.named_parameters() if p.requires_grad and name != "log_w_turn"]
     optimizer = torch.optim.Adam(ppo_parameters, lr=LEARNING_RATE, eps=1e-5)
     w_optimizer = torch.optim.Adam([network.log_w_turn], lr=1e-3) if ADAPT_TURN_WEIGHT else None
+
+    # ActorCritic.EnergyCost takes (VARRayDistance, maze_size). If reward() does not pass them on, the viewer supplies
+    # them here, so actor_critic.py stays untouched. If reward() passes them, or EnergyCost no longer takes them,
+    # this changes nothing.
+    energy_cost = network.EnergyCost
+    energy_cost_needs_ray_args = "VARRayDistance" in inspect.signature(energy_cost).parameters
 
     mode = "TRAIN" if train else ("WATCH (mean)" if deterministic else "WATCH (sampled)")
     view = _new_view(train, mode, float(VARAllowedEnergy))
@@ -380,6 +393,14 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
         updates = 0
         episode_ids = range(rollouts) if rollouts is not None else itertools.count()
 
+        if energy_cost_needs_ray_args:                      # fill in whatever reward() does not pass (maze_size is read per call)
+            def energy_cost_with_ray_args(*args, **kwargs):
+                if len(args) < 9:
+                    kwargs.setdefault("VARRayDistance", VARRayDistance)
+                    kwargs.setdefault("maze_size", maze_size)
+                return energy_cost(*args, **kwargs)
+            network.EnergyCost = energy_cost_with_ray_args
+
         for _rollout in episode_ids:
             if ctl.set_x is not None:                       # [ / ] keys
                 x, ctl.set_x = ctl.set_x, None
@@ -398,6 +419,7 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
             total_turn_delta = 0.0
             episode_start = buffered_steps
             RegionsExplored = set()
+            PixelVisits = np.zeros(np.asarray(pixel_grid).shape)    # how often each pixel has been entered this episode
 
             start_region = goal_region = None
             if grid_distance > 0:
@@ -434,7 +456,7 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
                 cast_lengths = [r[1] for r in rays if r[2]]
                 view.update(
                     pos=robot_pos.copy(), angle=angle, rays=rays, step=step, goal_distance=distance_finish,
-                    rays_cast=network.last_rays_cast, lidar_ms=network.time_cost * 1000.0,
+                    rays_cast=network.last_rays_cast, lidar_ms=0.0,
                     min_ray=min(cast_lengths) if cast_lengths else None, energy_used=float(network.EnergyUsed),
                 )
                 yield "sense"
@@ -464,6 +486,9 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
 
                 # Virtually update robot stats without directional floor bias.
                 new_pos = (robot_pos + step_size * np.array([np.cos(new_angle), np.sin(new_angle)])).astype(np.float32)
+                visit_pixel = tuple(int(np.clip(np.floor(new_pos[i]), 0, PixelVisits.shape[i] - 1)) for i in range(2))
+                current_pixel_visits = PixelVisits[visit_pixel]         # times this pixel was entered before now
+                PixelVisits[visit_pixel] += 1
                 robot_path.append(new_pos.copy())
                 angle_diff_step = abs((new_angle - old_angle + math.pi) % (2 * math.pi) - math.pi)
                 total_turn_delta += angle_diff_step # turn sharpness
@@ -485,12 +510,15 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
                 in_goal_pixel = bool(np.all(np.floor(new_pos / grid_distance) == np.floor(end_point / grid_distance)))
                 goal_distance = 0.0 if in_goal_pixel else next_distance_finish
 
+                # nearest wall the LiDAR saw this step, in pixels (rays outside the FOV hold the max distance, so they never win)
+                min_ray_px = min(State[:int(VARNumberOfRayCasts)]) * max_ray
+
                 Reward, done, maze_solved = network.reward(
                     distance_progress, run_into_wall, in_dead_end, goal_distance,
                     region_unexplored, robot_pos, new_pos, step_size, success_rate,
-                    old_angle, new_angle, maze_size, done, turn_excess
+                    old_angle, new_angle, maze_size, done, turn_excess, min_ray_px
                 )
-
+                Reward -= 0.02 * current_pixel_visits                   # revisit penalty, same as StartAgent
                 episode_reward += Reward
                 episode_length += 1
 
@@ -576,6 +604,7 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
                     network.log_w_turn.clamp_(math.log(1e-4), math.log(10.0))
 
             network.clear_memory(capacity) # return to next episode
+            network.set_max_step(success_rate) # buffer is empty, so it is safe to change the step cap now
             buffered_steps = 0
             buffered_advantages, buffered_returns = [], []
             buffer_turn_total = 0.0
@@ -708,6 +737,6 @@ if __name__ == "__main__":
     parser.add_argument("--sps", type=int, default=15, help="steps per second")
     parser.add_argument("--sampled", action="store_true", help="when watching a policy, sample actions instead of using the mean")
     args = parser.parse_args()
-    StartViewer("viewer", 48, 24, 24, 9000, 29, "orth", 0.5, 1, 360, None, seed=args.seed, policy_path=args.policy,
+    StartViewer("viewer", 48, 24, 24, 9000, 34, "orth", 0.5, 1, 180, None, seed=args.seed, policy_path=args.policy,
                 deterministic=(False if args.sampled else None), start_difficulty=args.start_x, steps_per_second=args.sps)
     sys.exit(0)

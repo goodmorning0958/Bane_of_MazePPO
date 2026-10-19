@@ -21,6 +21,9 @@ ENERGY_REWARD_WEIGHT = 0.1
 TURN_REWARD_WEIGHT = 0.2
 TIME_REWARD_WEIGHT = 0.0
 TURN_EXCESS_WEIGHT = 0.05
+MAX_STEP_START = 1.5      # largest step (px) the policy can take at 0% success
+MAX_STEP_END = 5.0        # largest step (px) once success_rate >= STEP_RAMP_SUCCESS
+STEP_RAMP_SUCCESS = 0.4
 
 class ActorCritic(nn.Module):
     def __init__(self, h1, h2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, VARFOV, inputs, action_dim=2):
@@ -54,7 +57,8 @@ class ActorCritic(nn.Module):
         self.log_w_turn = nn.Parameter(torch.tensor(math.log(0.05)), requires_grad=ADAPT_TURN_WEIGHT)
         self.target_max_turn = float(VARtargetMaxTurn)
         self.FOV = _fov_to_radians(VARFOV)
-        self.time_cost = 0.0
+        self.max_step = MAX_STEP_START
+        self.step_scale = MAX_STEP_START / 2.0   # step = step_scale * (tanh + 1), so 0 .. max_step
         self.last_rays_cast = 0
         self.last_raw_energy = 0.0
         self.last_energy_component = 0.0
@@ -65,6 +69,11 @@ class ActorCritic(nn.Module):
     @property
     def w_turn(self):
         return torch.exp(self.log_w_turn)
+
+    def set_max_step(self, success_rate):
+        # Only call this between PPO updates (buffer empty): the stored log-probs use the scale they were collected with.
+        self.max_step = MAX_STEP_START + (MAX_STEP_END - MAX_STEP_START) * min(1.0, success_rate / STEP_RAMP_SUCCESS)
+        self.step_scale = self.max_step / 2.0
 
     @torch.no_grad()
     def clear_memory(self, MaxSteps):
@@ -91,16 +100,14 @@ class ActorCritic(nn.Module):
     def get_action_distribution(self, mean, stds):
         return dist.Normal(mean[..., 0], stds[..., 0]), dist.Normal(mean[..., 1], stds[..., 1])
 
-    @staticmethod
-    def _squash_action(latent_action):
+    def _squash_action(self, latent_action):
         bounded = torch.tanh(latent_action)
-        return torch.stack([math.pi * bounded[..., 0], 2.5 * (bounded[..., 1] + 1.0)], dim=-1)
+        return torch.stack([math.pi * bounded[..., 0], self.step_scale * (bounded[..., 1] + 1.0)], dim=-1)
 
-    @staticmethod
-    def _action_log_prob(mean, stds, latent_action):
+    def _action_log_prob(self, mean, stds, latent_action):
         # uses jacobian
         log_jacobian = 2.0 * (math.log(2.0) - latent_action - F.softplus(-2.0 * latent_action))
-        log_jacobian = log_jacobian + latent_action.new_tensor([math.log(math.pi), math.log(2.5)])
+        log_jacobian = log_jacobian + latent_action.new_tensor([math.log(math.pi), math.log(self.step_scale)])
         return (dist.Normal(mean, stds).log_prob(latent_action) - log_jacobian).sum(dim=-1)
 
     @torch.no_grad()
@@ -198,18 +205,16 @@ class ActorCritic(nn.Module):
         return neighbour_counter >= 3, region_pos
 
     @torch.no_grad()
-    def EnergyCost(self, angle, step_size, new_angle, done, c1, c2, c3):
+    def EnergyCost(self, angle, step_size, new_angle, done, c1, c2, c3, VARRayDistance, maze_size):
         turn = (new_angle - angle + math.pi) % (2 * math.pi) - math.pi
         _, energy_value = ConvertRobotAction([turn, step_size], done)
         energy_value = float(energy_value)
-
-        if not math.isfinite(energy_value):
-            raise ValueError("ConvertRobotAction returned non-finite energy.")
-        
         raw_energy = max(0.0, energy_value)
         angle_diff = abs((new_angle - angle + math.pi) % (2 * math.pi) - math.pi)
         turn_cost = float(self.w_turn.item()) * angle_diff
-        compute_time = max(0.0, float(self.time_cost))
+
+        max_distance = float(maze_size if VARRayDistance is None else VARRayDistance)
+        compute_time = float(0.002 * self.last_rays_cast * (max_distance / 10) ** 1)
         self.last_raw_energy = raw_energy
 
         energy_scale = self.VARAllowedEnergy / self.MaxSteps
@@ -221,7 +226,7 @@ class ActorCritic(nn.Module):
         )
         return self.last_total_penalty
 
-    def reward(self, distance_progress, run_into_wall, in_dead_end, distance_finish, region_unexplored, robot_pos, new_pos, step_size, success_rate, angle, new_angle, maze_size, done, turn_excess=0.0):
+    def reward(self, distance_progress, run_into_wall, in_dead_end, distance_finish, region_unexplored, robot_pos, new_pos, step_size, success_rate, angle, new_angle, maze_size, done, turn_excess=0.0, min_ray_px):
         goal_reached = distance_finish < 0.5
 
         failed_by_collision = bool(run_into_wall)
@@ -241,8 +246,8 @@ class ActorCritic(nn.Module):
 
         self.EnergyUsed += self.last_raw_energy
         safe_maze_size = max(float(maze_size), 1e-6)
-        reward = 1.0 * (distance_progress / safe_maze_size) - 0.1 * (step_size / safe_maze_size) - total_penalty_energy
-
+        reward = 1.0 * (distance_progress / safe_maze_size) - 0.01 - total_penalty_energy -0.05 * max(0, 1 - min_ray_px / 1.5)
+        
         if failed_by_collision:
             return float(reward - 5.0), True, False
         if goal_reached:
@@ -253,8 +258,9 @@ class ActorCritic(nn.Module):
             reward -= 1.0
         if region_unexplored:
             reward += 0.1
-        if np.allclose(robot_pos, new_pos):
+        if step_size < 0.25:
             reward -= 2.0
+        
         return float(reward), False, False
 
     def InitializeWeights(self, Type):
@@ -302,10 +308,13 @@ class ActorCritic(nn.Module):
         if not alignment_path:
             return float("inf")
         return float(dtw_distance / len(alignment_path))
-
+    
+    @torch.no_grad()
+    def wrap(a):
+        return (a + math.pi) % (2 * math.pi) - math.pi
+    
     @torch.no_grad()
     def GetState(self, robot_pos, VarNumberOfRayCasts, bsp, Rayangle, VARFOV, angle, VARRayDistance, maze_size, end_point):
-        start_time = time.perf_counter()
         distances = []
         self.last_rays_cast = 0
         ray_count = int(VarNumberOfRayCasts)
@@ -335,15 +344,14 @@ class ActorCritic(nn.Module):
                 distance = max_distance
             distances.append(max(0.0, distance))
 
-        self.time_cost = time.perf_counter() - start_time
-
         goal_delta = (np.asarray(end_point) - np.asarray(robot_pos)) / max(float(maze_size), 1e-6)
         energy_remaining = max(0.0, 1.0 - self.EnergyUsed / self.VARAllowedEnergy)
-        angle_finish = float(math.atan2(end_point[1] - robot_pos[1], end_point[0] - robot_pos[0]) - angle)
-        distance_finish = float(np.linalg.norm(end_point - robot_pos))
+        heading = self.wrap(float(angle))
+        angle_finish = self.wrap(math.atan2(end_point[1] - robot_pos[1], end_point[0] - robot_pos[0]) - float(angle))
+        distance_finish = float(np.linalg.norm(end_point - robot_pos)) / max(float(maze_size), 1e-6)
 
         return [d / max_distance for d in distances] + [
             float(goal_delta[0]), float(goal_delta[1]),
-            math.sin(float(angle)), math.cos(float(angle)), angle, energy_remaining,
-            math.sin(angle_finish), math.cos(angle_finish), angle_finish, distance_finish,
+            math.sin(heading), math.cos(heading), heading / math.pi, energy_remaining,
+            math.sin(angle_finish), math.cos(angle_finish), angle_finish / math.pi, distance_finish,
         ]

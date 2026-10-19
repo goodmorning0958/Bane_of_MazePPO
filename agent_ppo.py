@@ -21,6 +21,9 @@ from actor_critic import (
     ENERGY_REWARD_WEIGHT,
     TURN_REWARD_WEIGHT,
     TIME_REWARD_WEIGHT,
+    MAX_STEP_START,
+    MAX_STEP_END,
+    STEP_RAMP_SUCCESS,
 )
 from maze_utils import raycaster_env, _fov_to_radians, _build_bsp_tree
 
@@ -137,6 +140,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
     # classes
     network = ActorCritic(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, VARFOV, NNinputs)
     network.InitializeWeights(VARWeightInitType)
+    network.set_max_step(success_rate)
 
     # config
     ppo_parameters = [p for name, p in network.named_parameters() if p.requires_grad and name != "log_w_turn"]
@@ -153,6 +157,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
                   initial_difficulty=x, k=network.k.item(), sd=network.sd.item(),
                   ray_offset=network.RayOffset.item(), weight_init=VARWeightInitType,
                   max_steps=network.MaxSteps, min_rollout_steps=MIN_ROLLOUT_STEPS,
+                  max_step_start=MAX_STEP_START, max_step_end=MAX_STEP_END, step_ramp_success=STEP_RAMP_SUCCESS,
                   ppo_epochs=PPO_EPOCHS, minibatch_size=MINIBATCH_SIZE, target_kl=TARGET_KL,
                   learning_rate=LEARNING_RATE, entropy_coef=ENTROPY_COEF,
                   dead_end_terminal=DEAD_END_IS_TERMINAL, torch_version=torch.__version__,
@@ -192,6 +197,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
         total_turn_delta = 0.0
         episode_start = buffered_steps
         RegionsExplored = set()
+        PixelVisits = np.zeros((maze_size, maze_size))
 
         start_region = goal_region = None
         if grid_distance > 0:
@@ -215,7 +221,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             done = False
             distance_finish = float(np.linalg.norm(end_point - robot_pos))
             State = network.GetState(robot_pos, VARNumberOfRayCasts, BSP, network.RayOffset, network.FOV, angle, VARRayDistance, maze_size, end_point)
-            lidar_seconds_this_rollout += network.time_cost
+            
             rays_this_rollout += network.last_rays_cast
             
             # Get action
@@ -239,6 +245,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
 
             # Virtually update robot stats without directional floor bias.
             new_pos = (robot_pos + step_size * np.array([np.cos(new_angle), np.sin(new_angle)])).astype(np.float32)
+            current_pixel_visits = PixelVisits[new_pos]
             robot_path.append(new_pos.copy())
             path_length += float(np.linalg.norm(new_pos - robot_pos))
             angle_diff_step = abs((new_angle - old_angle + math.pi) % (2 * math.pi) - math.pi)
@@ -261,10 +268,13 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             in_goal_pixel = bool(np.all(np.floor(new_pos / grid_distance) == np.floor(end_point / grid_distance)))
             goal_distance = 0.0 if in_goal_pixel else next_distance_finish
 
-            Reward, done, maze_solved = network.reward(
+            rays = State[0]
+            min_ray_px = min(rays[:network.last_rays_cast]) * VARRayDistance
+
+            Reward, done, maze_solved = - 0.02 * current_pixel_visits + network.reward(
                 distance_progress, run_into_wall, in_dead_end, goal_distance,
                 region_unexplored, robot_pos, new_pos, step_size, success_rate,
-                old_angle, new_angle, maze_size, done, turn_excess
+                old_angle, new_angle, maze_size, done, turn_excess, min_ray_px
             )
 
             episode_reward += Reward
@@ -351,11 +361,12 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             print(f"episode={episode_count} success={success_rate:.3f} steps={buffered_steps} KL={final_kl:.4f}")
 
         network.clear_memory(capacity) # return to next episode
+        network.set_max_step(success_rate) # buffer is empty, so it is safe to change the step cap now
         buffered_steps = 0
         buffered_advantages, buffered_returns = [], []
         buffer_turn_total = 0.0
 
     # added a way to save the model's state
-    torch.save({"model_state_dict": network.state_dict(), "config": config}, directory / f"Policy_{agnt}.pt")
+    torch.save({"model_state_dict": network.state_dict(), "config": config, "max_step": network.max_step}, directory / f"Policy_{agnt}.pt")
     network.output_directory = str(directory)
     return network
