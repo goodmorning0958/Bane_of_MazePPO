@@ -1,6 +1,7 @@
 import csv
 import json
 import math
+import os
 import time
 import numpy as np
 import torch
@@ -49,17 +50,16 @@ TARGET_KL = 0.02
 LEARNING_RATE = 3e-4
 ENTROPY_COEF = 0.01
 CURRICULUM_ENABLED = True
-REWARD_DEBUG_EVERY = 20
 TURN_LIMIT_SUCCESS = 0.4  
-MIN_ROLLOUT_STEPS_LEARNING = 512   # buffer size once the agent has started to succeed (MIN_ROLLOUT_STEPS applies before that)
-CURRICULUM_WINDOW = 50             # episodes in the rolling success window
-CURRICULUM_PROMOTE = 0.6           # rolling success needed to move up a stage
-CURRICULUM_DEMOTE = 0.1            # rolling success at or below this moves back down a stage
-CURRICULUM_STAGES = [0, 7, 20, 51, 54, 148, 403, 1096]   # x where the maze changes (see get_new_training_example)
-STALL_WINDOW = 20                  # end the episode if the robot moved less than STALL_MIN_DISPLACEMENT px ...
-STALL_MIN_DISPLACEMENT = 2.0       # ... during the last STALL_WINDOW steps
+MIN_ROLLOUT_STEPS_LEARNING = 512   
+CURRICULUM_WINDOW = 50             
+CURRICULUM_PROMOTE = 0.6           
+CURRICULUM_DEMOTE = 0.1            
+CURRICULUM_STAGES = [0, 7, 20, 30, 40, 50]
+STALL_WINDOW = 20                  
+STALL_MIN_DISPLACEMENT = 2.0     
 STALL_END_PENALTY = 1.0
-SUMMARY_SUCCESS_WINDOW = 100       # episodes the end-of-run summary averages over
+SUMMARY_SUCCESS_WINDOW = 100    
 
 def _compute_gae(rewards, values, dones, next_value, gamma=0.99, lam=0.95): 
     advantages = torch.zeros_like(rewards)
@@ -141,8 +141,7 @@ def _ppo_update(network, optimizer, ppo_parameters, states, actions, log_probs, 
 
     return diagnostics, final_kl, stopped or final_kl > TARGET_KL, explained_variance
 
-def _write_summary(path, history, milestones, config, start_time):
-    # Study summary: rewritten after every PPO update (so an interrupted run still has one) and at the end.
+def _write_summary(path, history, config, start_time):
     def mean(values):
         values = [v for v in values if v is not None and math.isfinite(v)]
         return float(np.mean(values)) if values else None
@@ -153,9 +152,6 @@ def _write_summary(path, history, milestones, config, start_time):
     win_energy = sorted(h["energy"] for h in wins)
     summary = dict(
         episodes=len(history), wall_seconds=time.perf_counter() - start_time,
-        first_success_episode=milestones["first_success"],
-        episodes_to_rolling_success_50=milestones["half_rolling"],
-        highest_stage=milestones["max_stage"], final_stage=milestones["stage"],
         last_window_success_rate=mean([h["success"] for h in last]),
         last_window_path_efficiency=mean([h["spl"] for h in last]),
         last_window_accuracy=mean([h["accuracy"] for h in last_wins]),
@@ -176,6 +172,19 @@ def _write_summary(path, history, milestones, config, start_time):
     )
     path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
+# checkpoint / resume (main.py sets STOP_AT and STOP_FILE for each agent)
+CHECKPOINT_EVERY = 1000     # episodes between automatic checkpoints
+STOP_AT = None              # unix time after which the agent saves a checkpoint and stops
+STOP_FILE = None            # if this file exists the agent saves a checkpoint and stops
+
+def _trim_csv(path, column, keep):
+    # drop log rows written after the checkpoint (only matters after a crash)
+    with open(path, newline="", encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+    rows = rows[:1] + [r for r in rows[1:] if keep(float(r[column]))]
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerows(rows)
+
 # main
 def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARWeightInitType, VARtargetMaxTurn, agnt, VARFOV, VARRayDistance, *, seed=SEED, rollouts=None, output_dir=None):
     random.seed(seed)
@@ -191,12 +200,12 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
     episode_count = 0
     past = 0
     not_past = 0
-    stage = 0                                   # curriculum stage; x = CURRICULUM_STAGES[stage]
-    recent_outcomes = deque(maxlen=CURRICULUM_WINDOW)   # last episodes, for the ramps and the rollout size
-    stage_outcomes = deque(maxlen=CURRICULUM_WINDOW)    # episodes at the current stage, for promotion / demotion
-    ramp_rate = 0.0     # best rolling success so far; drives the step cap, turn limit and energy weight (never goes down)
-    history = []        # one dict per episode, for the summary file
-    milestones = dict(first_success=None, half_rolling=None, max_stage=0, stage=0)
+    stage = 0                                 
+    recent_outcomes = deque(maxlen=CURRICULUM_WINDOW)   
+    stage_outcomes = deque(maxlen=CURRICULUM_WINDOW)   
+    ramp_rate = 0.0     
+    energy_ramp_rate = 0.0
+    history = []        
     start_time = time.perf_counter()
 
     # classes
@@ -249,9 +258,34 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
                        "rolling_success", "ramp_rate", "max_step_cap", "stage", "rollout_target"],
     }
 
-    for name, header in headers.items():
-        with open(directory / f"{name}_{test}{agnt}.csv", "x", newline="", encoding="utf-8") as f:
-            csv.writer(f).writerow(header)
+    # resume from a checkpoint if there is one in this folder
+    checkpoint_path = directory / "checkpoint.pt"
+    resumed = checkpoint_path.exists()
+    if resumed:
+        ck = torch.load(checkpoint_path, weights_only=False)
+        network.load_state_dict(ck["model"])
+        optimizer.load_state_dict(ck["optimizer"])
+        if w_optimizer is not None:
+            w_optimizer.load_state_dict(ck["w_optimizer"])
+        x, stage, ramp_rate, energy_ramp_rate = ck["x"], ck["stage"], ck["ramp_rate"], ck["energy_ramp_rate"]
+        past, not_past, success_rate, episode_count = ck["past"], ck["not_past"], ck["success_rate"], ck["episode_count"]
+        recent_outcomes.extend(ck["recent_outcomes"])
+        stage_outcomes.extend(ck["stage_outcomes"])
+        history = ck["history"]
+        start_time = time.perf_counter() - ck["elapsed"]
+        random.setstate(ck["python_rng"])
+        np.random.set_state(ck["numpy_rng"])
+        torch.set_rng_state(ck["torch_rng"])
+        network.set_max_step(ramp_rate)
+        _trim_csv(directory / f"EpisodeData_{test}{agnt}.csv", 0, lambda v: v < episode_count)
+        _trim_csv(directory / f"TrainingData_{test}{agnt}.csv", 0, lambda v: v <= episode_count)
+        _trim_csv(directory / f"UpdateData_{test}{agnt}.csv", 0, lambda v: v <= episode_count)
+    last_checkpoint = episode_count
+
+    if not resumed:
+        for name, header in headers.items():
+            with open(directory / f"{name}_{test}{agnt}.csv", "x", newline="", encoding="utf-8") as f:
+                csv.writer(f).writerow(header)
 
     capacity = max(MIN_ROLLOUT_STEPS, MIN_ROLLOUT_STEPS_LEARNING) + network.MaxSteps
     network.clear_memory(capacity)
@@ -259,8 +293,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
     buffered_advantages, buffered_returns = [], []
     buffer_turn_total = 0.0
     buffer_episode_rewards, buffer_episode_steps = [], []
-    for _rollout in range(rollouts):
-        print(_rollout)
+    for _rollout in range(episode_count, rollouts):
         # get training example
         start_point, end_point, maze_size, grid_distance, walls, pixel_grid = get_new_training_example(x, network.k, network.sd)
         robot_pos = np.array(start_point, dtype=np.float32)
@@ -271,7 +304,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
         episode_x, episode_stage = x, stage
 
         # Initializations
-        angle = float((7 * math.pi) / 4)
+        angle = 0.0
         A_star_path = Normal_A_star_search(np.array(pixel_grid), [int(v) for v in start_point], [int(v) for v in np.floor(end_point)])
         A_star_points = np.asarray(A_star_path, dtype=float)
         optimal_length = float(np.linalg.norm(np.diff(A_star_points, axis=0), axis=1).sum()) if len(A_star_points) > 1 else 0.0
@@ -306,7 +339,14 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             done = False
             distance_finish = float(np.linalg.norm(end_point - robot_pos))
             lidar_start = time.perf_counter()
-            State = network.GetState(robot_pos, VARNumberOfRayCasts, BSP, network.RayOffset, network.FOV, angle, VARRayDistance, maze_size, end_point)
+            State, max_ray_angle = network.GetState(robot_pos, VARNumberOfRayCasts, BSP, network.RayOffset, network.FOV, angle, VARRayDistance, maze_size, end_point)
+
+            if step == 0:
+                angle = max_ray_angle
+                rays_this_rollout += network.last_rays_cast
+                sensing_units += network.last_rays_cast * ray_range / 10.0
+                State, _ = network.GetState(robot_pos, VARNumberOfRayCasts, BSP, network.RayOffset, network.FOV, angle, VARRayDistance, maze_size, end_point)
+               
             lidar_seconds_this_rollout += time.perf_counter() - lidar_start
             
             rays_this_rollout += network.last_rays_cast
@@ -331,7 +371,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             turn = max(-turn_limit, min(turn_limit, turn))
             new_angle = (old_angle + turn + math.pi) % (2 * math.pi) - math.pi
 
-            # Virtually update robot stats without directional floor bias.
+            # Virtually update robot stats 
             new_pos = (robot_pos + step_size * np.array([np.cos(new_angle), np.sin(new_angle)])).astype(np.float32)
             visit_pixel = tuple(int(np.clip(np.floor(new_pos[i]), 0, PixelVisits.shape[i] - 1)) for i in range(2))
             current_pixel_visits = PixelVisits[visit_pixel]         # times this pixel was entered before now
@@ -364,7 +404,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
 
             Reward, done, maze_solved = network.reward(
                 distance_progress, run_into_wall, in_dead_end, goal_distance,
-                region_unexplored, VARRayDistance, new_pos, step_size, ramp_rate,
+                region_unexplored, VARRayDistance, new_pos, step_size, energy_ramp_rate,
                 old_angle, new_angle, maze_size, done, min_ray_px, turn_excess, current_pixel_visits
             )
 
@@ -383,10 +423,10 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             buffered_steps += 1
 
             # action data log
-            network.LogDataToCSV(None, [float(Action[0]), float(Action[1]), float(value), Reward,
-                                       network.last_total_penalty, network.last_raw_energy,
-                                       network.last_energy_component, network.last_turn_component,
-                                       network.last_time_component], None, "act", agnt, directory, test)
+            #network.LogDataToCSV(None, [float(Action[0]), float(Action[1]), float(value), Reward,
+           #                            network.last_total_penalty, network.last_raw_energy,
+            #                           network.last_energy_component, network.last_turn_component,
+            #                           network.last_time_component], None, "act", agnt, directory, test)
             # update the robot (angle / position)
             robot_pos, angle = new_pos, new_angle
             if done:
@@ -397,30 +437,30 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
 
         past += int(maze_solved)
         not_past += int(not maze_solved)
-        success_rate = past / (past + not_past) # lifetime success rate (logged; the ramps use ramp_rate)
+        success_rate = past / (past + not_past) 
 
-        # rolling window: drives the ramps, the rollout size and the curriculum
+        # Cirriculum
         recent_outcomes.append(int(maze_solved))
         rolling_success = sum(recent_outcomes) / len(recent_outcomes)
+
         if len(recent_outcomes) == CURRICULUM_WINDOW:
             ramp_rate = max(ramp_rate, rolling_success)
-            if milestones["half_rolling"] is None and rolling_success >= 0.5:
-                milestones["half_rolling"] = episode_count
-        if maze_solved and milestones["first_success"] is None:
-            milestones["first_success"] = episode_count
-        if CURRICULUM_ENABLED:   # promote / demote on the success rate of the last CURRICULUM_WINDOW episodes at this stage
+            energy_ramp_rate = max(energy_ramp_rate, rolling_success)
+        if CURRICULUM_ENABLED:   
             stage_outcomes.append(int(maze_solved))
             if len(stage_outcomes) == CURRICULUM_WINDOW:
                 stage_rate = sum(stage_outcomes) / CURRICULUM_WINDOW
                 if stage_rate >= CURRICULUM_PROMOTE and stage < len(CURRICULUM_STAGES) - 1:
                     stage += 1
                     stage_outcomes.clear()
+                    ramp_rate = 0.0
+                    recent_outcomes.clear()
                 elif stage_rate <= CURRICULUM_DEMOTE and stage > 0:
                     stage -= 1
                     stage_outcomes.clear()
+                    ramp_rate = 0.0
+                    recent_outcomes.clear()
                 x = CURRICULUM_STAGES[stage]
-                milestones["max_stage"] = max(milestones["max_stage"], stage)
-                milestones["stage"] = stage
 
         # accuracy using A*
         ACCURACY = network.GetRobotAccuracy(np.asarray(A_star_path), np.asarray(robot_path))
@@ -440,7 +480,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
 
         # Log data
         network.LogDataToCSV(Episode_Payload, None, None, "ep", agnt, directory, test)
-        network.LogDataToCSV(pixel_grid, ACCURACY, None, "mze", agnt, directory, test)
+        #network.LogDataToCSV(pixel_grid, ACCURACY, None, "mze", agnt, directory, test)
         episode_count += 1
 
         # Comput GAE and PPO / other opitimizations
@@ -448,7 +488,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             next_value = torch.tensor(0.0, dtype=torch.float32)
         else:
             with torch.no_grad():
-                FinalState = network.GetState(robot_pos, VARNumberOfRayCasts, BSP, network.RayOffset, network.FOV, angle, VARRayDistance, maze_size, end_point)
+                FinalState, _ = network.GetState(robot_pos, VARNumberOfRayCasts, BSP, network.RayOffset, network.FOV, angle, VARRayDistance, maze_size, end_point)
                 _, _, next_value = network.forward(FinalState)
 
         episode_slice = slice(episode_start, buffered_steps)
@@ -477,7 +517,6 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
                                     float(np.mean([row[3] for row in diagnostics])) if diagnostics else None,
                                     float(network.log_std[0]), float(network.log_std[1]), rolling_success, ramp_rate,
                                     network.max_step, stage, rollout_target])
-
         # Update weights adam
         if w_optimizer is not None:
             avg_turn = buffer_turn_total / buffered_steps
@@ -487,20 +526,31 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             w_optimizer.step()
             with torch.no_grad():
                 network.log_w_turn.clamp_(math.log(1e-4), math.log(10.0))
-
-        if REWARD_DEBUG_EVERY and (episode_count % REWARD_DEBUG_EVERY == 0 or _rollout == rollouts - 1):
-            print(f"episode={episode_count} success={success_rate:.3f} rolling={rolling_success:.2f} stage={stage} steps={buffered_steps} KL={final_kl:.4f}")
-
-        network.clear_memory(capacity) # return to next episode
-        network.set_max_step(ramp_rate) # buffer is empty, so it is safe to change the step cap now
+        network.clear_memory(capacity) 
+        network.set_max_step(ramp_rate) 
         buffered_steps = 0
         buffered_advantages, buffered_returns = [], []
         buffer_turn_total = 0.0
         buffer_episode_rewards, buffer_episode_steps = [], []
-        _write_summary(directory / f"Summary_{test}{agnt}.json", history, milestones, config, start_time)
+        _write_summary(directory / f"Summary_{test}{agnt}.json", history, config, start_time)
+
+        # checkpoint: every CHECKPOINT_EVERY episodes, and when it is time to stop
+        stopping = (STOP_AT is not None and time.time() >= STOP_AT) or (STOP_FILE is not None and os.path.exists(STOP_FILE))
+        if _rollout != rollouts - 1 and (stopping or episode_count - last_checkpoint >= CHECKPOINT_EVERY):
+            torch.save({"model": network.state_dict(), "optimizer": optimizer.state_dict(),
+                        "w_optimizer": w_optimizer.state_dict() if w_optimizer is not None else None,
+                        "x": x, "stage": stage, "ramp_rate": ramp_rate, "energy_ramp_rate": energy_ramp_rate,
+                        "past": past, "not_past": not_past, "success_rate": success_rate, "episode_count": episode_count,
+                        "recent_outcomes": list(recent_outcomes), "stage_outcomes": list(stage_outcomes), "history": history,
+                        "elapsed": time.perf_counter() - start_time, "python_rng": random.getstate(),
+                        "numpy_rng": np.random.get_state(), "torch_rng": torch.get_rng_state()}, directory / "checkpoint.tmp")
+            os.replace(directory / "checkpoint.tmp", checkpoint_path)
+            last_checkpoint = episode_count
+            if stopping:
+                return
 
     # added a way to save the model's state
     torch.save({"model_state_dict": network.state_dict(), "config": config, "max_step": network.max_step}, directory / f"Policy_{agnt}.pt")
     network.output_directory = str(directory)
-    _write_summary(directory / f"Summary_{test}{agnt}.json", history, milestones, config, start_time)
+    _write_summary(directory / f"Summary_{test}{agnt}.json", history, config, start_time)
     return network

@@ -335,6 +335,8 @@ class ActorCritic(nn.Module):
     def GetState(self, robot_pos, VarNumberOfRayCasts, bsp, Rayangle, VARFOV, angle, VARRayDistance, maze_size, end_point):
         distances = []
         self.last_rays_cast = 0
+        max_ray_angle = 0
+        max_ray_distance = 0
         ray_count = int(VarNumberOfRayCasts)
         max_distance = float(maze_size if VARRayDistance is None else VARRayDistance)
         if not math.isfinite(max_distance) or max_distance <= 0:
@@ -360,8 +362,13 @@ class ActorCritic(nn.Module):
                 distance = float(np.asarray(raw_distance).item())
             if not math.isfinite(distance) or distance >= max_distance:
                 distance = max_distance
-            distances.append(max(0.0, distance))
+            final_distance = max(0.0, distance)
+            distances.append(final_distance)
 
+            if final_distance > max_ray_distance:
+               max_ray_angle = ray_angle
+               max_ray_distance = final_distance
+            
         goal_delta = (np.asarray(end_point) - np.asarray(robot_pos)) / max(float(maze_size), 1e-6)
         energy_remaining = max(0.0, 1.0 - self.EnergyUsed / self.VARAllowedEnergy)
         heading = self.wrap(float(angle))
@@ -372,4 +379,4 @@ class ActorCritic(nn.Module):
             float(goal_delta[0]), float(goal_delta[1]),
             math.sin(heading), math.cos(heading), heading / math.pi, energy_remaining,
             math.sin(angle_finish), math.cos(angle_finish), angle_finish / math.pi, distance_finish,
-        ]
+        ], max_ray_angle

@@ -1,6 +1,8 @@
 import struct
 import math
 
+ENERGY_PER_RADIAN = 0.5
+
 def ConvertRobotAction(Action: list[float], done) -> list[list[int]]:
     LWP3Packet = []
     VBase = 50 # Base velocity
@@ -16,7 +18,7 @@ def ConvertRobotAction(Action: list[float], done) -> list[list[int]]:
         VLeft = int(VBase * (1.0 - 2.0 * (min(1.0, abs(dir_)/(math.pi/4)))))
         VRight = VBase
 
-    Penalty = (VLeft**2 + VRight**2) / (2 * VBase**2) * float(step_size)
+    Penalty = float(step_size) + ENERGY_PER_RADIAN * abs(float(dir_))
 
     if VLeft < 0:
         VLeft = int(round((~VLeft & 255) + 1))
