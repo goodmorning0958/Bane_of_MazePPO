@@ -17,10 +17,13 @@ import torch
 
 EPISODES = 40000
 SEEDS = [42]
-LIMIT = None      
+MACHINE = 2        # set this to 1, 2 or 3 on each computer (1 = your PC, 2 = the Mac, 3 = the other Windows PC)
+JOBS_BY_MACHINE = {1: range(0, 52), 2: range(52, 66), 3: range(66, 81)}   # which agents each computer runs
+MAX_WORKERS = None   # agents run at once on this computer; None = every core, or set a number (e.g. 6) to run cooler
+JOBS = JOBS_BY_MACHINE[MACHINE]
 OUT = Path("runs") / "sweep_81_FULL_TRAIN"
 STOP_AT = None  
-STOP_FILE = OUT / "STOP"   
+STOP_FILE = OUT / "STOP"  
 
 DEFAULTS = dict(NNh1=48, NNh2=24, VARNumberOfRayCasts=24, VARAllowedEnergy=150, VARWeightInitType="orth",
                 VARtargetMaxTurn=0.5, VARFOV=360, VARRayDistance=None)
@@ -31,7 +34,7 @@ GRID = {
     "VARAllowedEnergy": [150, 60, 30],
     "VARtargetMaxTurn": [3.14159, 1.0, 0.5],
 }
-CONSTANTS = {"MAX_STEP_START": 1.5, "MAX_STEP_END": 1.5}   
+CONSTANTS = {"MAX_STEP_START": 1.5, "MAX_STEP_END": 1.5}  
 
 def stop_timestamp():
     if STOP_AT is None:
@@ -83,15 +86,16 @@ def run_job(job):
 
 start = time.perf_counter()
 if __name__ == "__main__":
-    jobs = build_jobs(stop_timestamp())[:LIMIT]
+    all_jobs = build_jobs(stop_timestamp())
+    jobs = [job for job in all_jobs if job["index"] in JOBS]
     OUT.mkdir(parents=True, exist_ok=True)
     STOP_FILE.unlink(missing_ok=True)
     with open(OUT / "manifest.csv", "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["index", "seed", "directory"] + list(GRID))
-        for job in jobs:
+        for job in all_jobs:
             writer.writerow([job["index"], job["seed"], job["directory"]] + list(job["params"].values()))
-    with ProcessPoolExecutor(max_workers=min(len(jobs), os.cpu_count() or 1)) as pool:
+    with ProcessPoolExecutor(max_workers=min(len(jobs), MAX_WORKERS or os.cpu_count() or 1)) as pool:
         list(pool.map(run_job, jobs))
     failed = [job["index"] for job in jobs if (Path(job["directory"]) / "error.txt").exists()]
     if failed:
