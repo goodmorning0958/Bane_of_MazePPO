@@ -48,7 +48,7 @@ def extra_stats(result, data):
     print("\nOdds Ratios:")
     print(odds_ratios)
 
-    print("\nOverall Success Rate")
+    print("\nOverall Success Rate:")
     print(success_rate, "%")
 
 def roc_auc(result, data):
