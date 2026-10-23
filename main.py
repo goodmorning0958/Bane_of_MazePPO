@@ -17,7 +17,11 @@ import torch
 
 EPISODES = 40000
 SEEDS = [42]
+<<<<<<< HEAD
 MACHINE = 2        # set this to 1, 2 or 3 on each computer (1 = your PC, 2 = the Mac, 3 = the other Windows PC)
+=======
+MACHINE = 1        # set this to 1, 2 or 3 on each computer (1 = your PC, 2 = the Mac, 3 = the other Windows PC)
+>>>>>>> 789b8ea (Update Bane_of_mazePPO)
 JOBS_BY_MACHINE = {1: range(0, 52), 2: range(52, 66), 3: range(66, 81)}   # which agents each computer runs
 MAX_WORKERS = None   # agents run at once on this computer; None = every core, or set a number (e.g. 6) to run cooler
 JOBS = JOBS_BY_MACHINE[MACHINE]
