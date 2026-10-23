@@ -11,7 +11,7 @@ This is where the LaTeX code for the research paper.
 
 \title{\textbf{Investigating the Navigational Accuracy of Energy-Efficient PPO and how computationally efficient AI improves compute scalability.}}
 
-\author{\textbf{Contributors:} Louis Robison \qquad Yile Xu \qquad Khan Doman}
+\author{\textbf{Contributors:} Louis Robison \qquad Yile Xu \qquad Kaan Circi}
 
 \date{\today}
 
