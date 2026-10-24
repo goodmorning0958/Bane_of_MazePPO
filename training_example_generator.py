@@ -38,7 +38,7 @@ def generate_maze(grid_distance, maze_size):
 
     x = np.arange(grid.shape[0])
     y = np.arange(grid.shape[0])
-    X, Y = np.meshgrid(x, y)
+    X, Y = np.meshgrid(x, y, indexing='ij')
 
     # pick start and end from a probability distribution
     Start_Probabilities = np.exp(-((X - start_mean[0])**2 + (Y - start_mean[1])**2) / (2 * (maze_size / 20)**2))
@@ -102,7 +102,6 @@ def reachable(grid, start, end):
     return False
 
 def get_new_training_example(training_steps, k=5.89, sd=20):
-
     if isinstance(k, torch.Tensor):
         k = k.item()
     if isinstance(sd, torch.Tensor):

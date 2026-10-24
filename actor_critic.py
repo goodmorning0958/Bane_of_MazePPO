@@ -21,22 +21,20 @@ ENERGY_REWARD_WEIGHT = 0.1
 TURN_REWARD_WEIGHT = 0.2
 TIME_REWARD_WEIGHT = 0.0
 TURN_EXCESS_WEIGHT = 0.05
-MAX_STEP_START = 1.5      # largest step (px) the policy can take at 0% success
-MAX_STEP_END = 5.0        # largest step (px) once success_rate >= STEP_RAMP_SUCCESS
+MAX_STEP_START = 1.5      
+MAX_STEP_END = 5.0        
 STEP_RAMP_SUCCESS = 0.4
 
-# Reward shaping. Every per-step term below is small next to the terminal rewards (+10 goal, -5 collision / dead end),
-# and the shaped part of a step is clipped to +-REWARD_CLIP, so no single term can dominate the returns.
 REWARD_CLIP = 1.0
-STEP_TIME_COST = 0.01       # lost every step, whatever the robot does
-CLEARANCE_WEIGHT = 0.05     # penalty when the nearest LiDAR hit is closer than CLEARANCE_DISTANCE px
+STEP_TIME_COST = 0.01       
+CLEARANCE_WEIGHT = 0.05    
 CLEARANCE_DISTANCE = 1.5
-VISIT_PENALTY = 0.02        # per earlier visit of the pixel the robot moved into ...
-VISIT_CAP = 5               # ... counting at most this many visits (so at most 0.1 per step)
-EXPLORE_BONUS = 0.1         # first time a block is entered
-STALL_STEP_SIZE = 0.25      # a step shorter than this counts as standing still ...
-STALL_STEP_PENALTY = 0.2    # ... and costs this much (was 2.0)
-OVER_BUDGET_PENALTY = 0.2   # per step once the energy budget is used up (was 1.0)
+VISIT_PENALTY = 0.02        
+VISIT_CAP = 5             
+EXPLORE_BONUS = 0.1       
+STALL_STEP_SIZE = 0.25     
+STALL_STEP_PENALTY = 0.2   
+OVER_BUDGET_PENALTY = 0.2 
 
 class ActorCritic(nn.Module):
     def __init__(self, h1, h2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, VARFOV, inputs, action_dim=2):
@@ -71,7 +69,7 @@ class ActorCritic(nn.Module):
         self.target_max_turn = float(VARtargetMaxTurn)
         self.FOV = _fov_to_radians(VARFOV)
         self.max_step = MAX_STEP_START
-        self.step_scale = MAX_STEP_START / 2.0   # step = step_scale * (tanh + 1), so 0 .. max_step
+        self.step_scale = MAX_STEP_START / 2.0 
         self.last_rays_cast = 0
         self.last_raw_energy = 0.0
         self.last_energy_component = 0.0
@@ -345,10 +343,11 @@ class ActorCritic(nn.Module):
         fov = _fov_to_radians(VARFOV)
 
         angle_step = (2 * math.pi) / ray_count
+        nearest_ray = int(np.argmin([abs((angle_step * j + ray_offset - float(angle) + math.pi) % (2 * math.pi) - math.pi) for j in range(ray_count)]))
         for i in range(ray_count):
             ray_angle = angle_step * i + ray_offset
             angle_difference = abs((ray_angle - float(angle) + math.pi) % (2 * math.pi) - math.pi)
-            if angle_difference > fov / 2:
+            if angle_difference > fov / 2 and i != nearest_ray:
                 distances.append(max_distance)
                 continue
 

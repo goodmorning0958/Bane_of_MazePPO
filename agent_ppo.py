@@ -55,7 +55,8 @@ MIN_ROLLOUT_STEPS_LEARNING = 512
 CURRICULUM_WINDOW = 50             
 CURRICULUM_PROMOTE = 0.6           
 CURRICULUM_DEMOTE = 0.1            
-CURRICULUM_STAGES = [0, 7, 20, 30, 40, 50]
+CURRICULUM_STAGES = [0, 7, 20, 30, 40, 50, 51, 54]
+KEEP_RAMP_FROM_STAGE = 5
 STALL_WINDOW = 20                  
 STALL_MIN_DISPLACEMENT = 2.0     
 STALL_END_PENALTY = 1.0
@@ -453,12 +454,14 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
                 if stage_rate >= CURRICULUM_PROMOTE and stage < len(CURRICULUM_STAGES) - 1:
                     stage += 1
                     stage_outcomes.clear()
-                    ramp_rate = 0.0
+                    if stage - 1 < KEEP_RAMP_FROM_STAGE:
+                        ramp_rate = 0.0
                     recent_outcomes.clear()
                 elif stage_rate <= CURRICULUM_DEMOTE and stage > 0:
                     stage -= 1
                     stage_outcomes.clear()
-                    ramp_rate = 0.0
+                    if stage < KEEP_RAMP_FROM_STAGE:
+                        ramp_rate = 0.0
                     recent_outcomes.clear()
                 x = CURRICULUM_STAGES[stage]
 

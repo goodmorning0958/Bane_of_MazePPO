@@ -105,10 +105,11 @@ def lidar_rays(state, ray_offset, angle, ray_count, fov, max_distance):
     is what the network saw (no second BSP traversal)."""
     step = (2 * math.pi) / ray_count
     rays = []
+    nearest = int(np.argmin([abs((step * j + ray_offset - float(angle) + math.pi) % (2 * math.pi) - math.pi) for j in range(ray_count)]))
     for i in range(ray_count):
         ray_angle = step * i + ray_offset
         diff = abs((ray_angle - float(angle) + math.pi) % (2 * math.pi) - math.pi)
-        cast = diff <= fov / 2
+        cast = diff <= fov / 2 or i == nearest
         length = float(state[i]) * max_distance
         rays.append((ray_angle, length, cast, bool(cast and length < max_distance - 1e-6)))
     return rays
@@ -402,7 +403,8 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
         not_past = 0
         recent_outcomes = deque(maxlen=CURRICULUM_WINDOW)   # same bookkeeping as StartAgent
         stage_outcomes = deque(maxlen=CURRICULUM_WINDOW)
-        ramp_rate = 0.0
+        ramp_rate = 0.0 if train else 1.0
+        energy_ramp_rate = ramp_rate
         capacity = max(MIN_ROLLOUT_STEPS, MIN_ROLLOUT_STEPS_LEARNING) + network.MaxSteps
         network.clear_memory(capacity)
         buffered_steps = 0
@@ -469,7 +471,10 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
 
             for step in range(network.MaxSteps):
                 done = False
-                State = network.GetState(robot_pos, VARNumberOfRayCasts, BSP, network.RayOffset, network.FOV, angle, VARRayDistance, maze_size, end_point)
+                State, max_ray_angle = network.GetState(robot_pos, VARNumberOfRayCasts, BSP, network.RayOffset, network.FOV, angle, VARRayDistance, maze_size, end_point)
+                if step == 0:
+                    angle = max_ray_angle
+                    State, _ = network.GetState(robot_pos, VARNumberOfRayCasts, BSP, network.RayOffset, network.FOV, angle, VARRayDistance, maze_size, end_point)
                 distance_finish = float(np.linalg.norm(end_point - robot_pos))
 
                 # ---- show this step: robot + the rays it just measured
@@ -539,7 +544,7 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
                 reward_kwargs = dict(
                     distance_progress=distance_progress, run_into_wall=run_into_wall, in_dead_end=in_dead_end,
                     distance_finish=goal_distance, region_unexplored=region_unexplored, robot_pos=robot_pos,
-                    new_pos=new_pos, step_size=step_size, success_rate=ramp_rate, angle=old_angle,
+                    new_pos=new_pos, step_size=step_size, success_rate=energy_ramp_rate, angle=old_angle,
                     new_angle=new_angle, maze_size=maze_size, done=done, turn_excess=turn_excess,
                     min_ray_px=min_ray_px, VARRayDistance=VARRayDistance, revisits=current_pixel_visits,
                 )
@@ -585,6 +590,7 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
             rolling_success = sum(recent_outcomes) / len(recent_outcomes)
             if len(recent_outcomes) == CURRICULUM_WINDOW:
                 ramp_rate = max(ramp_rate, rolling_success)
+                energy_ramp_rate = max(energy_ramp_rate, rolling_success)
             if CURRICULUM_ENABLED:   # promote / demote on the success rate of the last CURRICULUM_WINDOW episodes at this stage
                 stage_outcomes.append(int(maze_solved))
                 if len(stage_outcomes) == CURRICULUM_WINDOW:
@@ -592,9 +598,15 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
                     if stage_rate >= CURRICULUM_PROMOTE and stage < len(CURRICULUM_STAGES) - 1:
                         stage += 1
                         stage_outcomes.clear()
+                        if train:
+                            ramp_rate = 0.0
+                            recent_outcomes.clear()
                     elif stage_rate <= CURRICULUM_DEMOTE and stage > 0:
                         stage -= 1
                         stage_outcomes.clear()
+                        if train:
+                            ramp_rate = 0.0
+                            recent_outcomes.clear()
                     x = CURRICULUM_STAGES[stage]
             episode_count += 1
 
@@ -616,7 +628,7 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
                 next_value = torch.tensor(0.0, dtype=torch.float32)
             else:
                 with torch.no_grad():
-                    FinalState = network.GetState(robot_pos, VARNumberOfRayCasts, BSP, network.RayOffset, network.FOV, angle, VARRayDistance, maze_size, end_point)
+                    FinalState, _ = network.GetState(robot_pos, VARNumberOfRayCasts, BSP, network.RayOffset, network.FOV, angle, VARRayDistance, maze_size, end_point)
                     _, _, next_value = network.forward(FinalState)
 
             episode_slice = slice(episode_start, buffered_steps)
