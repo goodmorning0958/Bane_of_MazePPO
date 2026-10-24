@@ -9,26 +9,25 @@ def precision_analysis(p, e):
     return n
 
 def latin_hypercube_sampling(samples):
-    latin_hypercube = qmc.LatinHypercube(d=5, seed=68)
+    latin_hypercube = qmc.LatinHypercube(d=4, seed=68)
     sampling = latin_hypercube.random(samples)
 
     ray_count = np.round(qmc.scale(sampling[:, 0:1], [4], [128])).astype(int).flatten()
     fov = qmc.scale(sampling[:, 1:2], [45], [360]).flatten()
-    distance = qmc.scale(sampling[:, 2:3], [0.5], [5]).flatten()
     energy_constraint = qmc.scale(sampling[:, 3:4], [30], [100]).flatten()
     turn_sharpness = qmc.scale(sampling[:, 4:5], [15], [360]).flatten()
     
     lhs_configurations = []
     for i in range(samples):
-        lhs_configurations.append({'ray_count': ray_count[i], 'fov': fov[i], 'sensing_distance': distance[i], 'energy_constraint': energy_constraint[i], 'turn_sharpness': turn_sharpness[i]})
+        lhs_configurations.append({'ray_count': ray_count[i], 'fov': fov[i], 'energy_constraint': energy_constraint[i], 'turn_sharpness': turn_sharpness[i]})
 
     return lhs_configurations
 
 def logistic_regression(data):
-    X = data[['ray_count', 'fov', 'sensing_distance', 'energy_constraint', 'turn_sharpness']]
+    X = data[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn']]
     X = sm.add_constant(X)
 
-    y = data['success']
+    y = data['final_success_binary']
 
     model = sm.Logit(y, X)
     result = model.fit()
@@ -40,7 +39,7 @@ def extra_stats(result, data):
 
     odds_ratios = np.exp(result.params)
 
-    success_rate = data['success'].mean() * 100
+    success_rate = data['final_success_binary'].mean() * 100
 
     print("\n95% Confidence Intervals:")
     print(confidence_intervals)
@@ -52,10 +51,10 @@ def extra_stats(result, data):
     print(success_rate, "%")
 
 def roc_auc(result, data):
-    X = data[['ray_count', 'fov', 'sensing_distance', 'energy_constraint', 'turn_sharpness']]
+    X = data[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn']]
     X = sm.add_constant(X)
 
-    y = data['success']
+    y = data['final_success_binary']
     predicted_probability = result.predict(X)
 
     auc = roc_auc_score(y, predicted_probability)
@@ -66,28 +65,22 @@ def roc_auc(result, data):
     return fpr, tpr, thresholds, auc
 
 def interactions_logistic_regression(data):
-    X = data[['ray_count', 'fov', 'sensing_distance', 'energy_constraint', 'turn_sharpness']].copy()
+    X = data[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn']].copy()
 
-    X['ray_count'] -= X['ray_count'].mean()
-    X['fov'] -= X['fov'].mean()
-    X['sensing_distance'] -= X['sensing_distance'].mean()
-    X['energy_constraint'] -= X['energy_constraint'].mean()
-    X['turn_sharpness'] -= X['turn_sharpness'].mean()
-
-    X['ray_count_fov'] = X['ray_count'] * X['fov']
-    X['ray_count_sensing_distance'] = X['ray_count'] * X['sensing_distance']
-    X['fov_sensing_distance'] = X['fov'] * X['sensing_distance']
-
-    X['energy_constraint_turn_sharpness'] = X['energy_constraint'] * X['turn_sharpness']
-    X['ray_count_energy_constraint'] = X['ray_count'] * X['energy_constraint']
-    X['fov_turn_sharpness'] = X['fov'] * X['turn_sharpness']
-    X['sensing_distance_turn_sharpness'] = X['sensing_distance'] * X['turn_sharpness']
-    X['ray_count_turn_sharpness'] = X['ray_count'] * X['turn_sharpness']
-    X['fov_energy_constraint'] = X['fov'] * X['energy_constraint']
-    X['sensing_distance_energy_constraint'] = X['sensing_distance'] * X['energy_constraint']
+    X['VARNumberOfRayCasts'] -= X['VARNumberOfRayCasts'].mean()
+    X['VARFOV'] -= X['VARFOV'].mean()
+    X['VARAllowedEnergy'] -= X['VARAllowedEnergy'].mean()
+    X['VARtargetMaxTurn'] -= X['VARtargetMaxTurn'].mean()
+    
+    X['ray_count_fov'] = X['VARNumberOfRayCasts'] * X['VARFOV']
+    X['energy_constraint_turn_sharpness'] = X['VARAllowedEnergy'] * X['VARtargetMaxTurn']
+    X['ray_count_energy_constraint'] = X['VARNumberOfRayCasts'] * X['VARAllowedEnergy']
+    X['fov_turn_sharpness'] = X['VARFOV'] * X['VARtargetMaxTurn']
+    X['ray_count_turn_sharpness'] = X['VARNumberOfRayCasts'] * X['VARtargetMaxTurn']
+    X['fov_energy_constraint'] = X['VARFOV'] * X['VARAllowedEnergy']
 
     X = sm.add_constant(X)
-    y = data['success']
+    y = data['final_success_binary']
 
     model = sm.Logit(y, X)
     result = model.fit()

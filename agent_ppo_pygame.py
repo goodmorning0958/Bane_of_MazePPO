@@ -166,7 +166,6 @@ def _block_rect(layout, region, size):
     r0, c0 = region
     return (layout.ox + c0 * layout.cell, layout.oy + r0 * layout.cell, size * layout.cell, size * layout.cell)
 
-
 def _draw_board(screen, layout, view, ui, cache):
     cell = layout.cell
     key = (view.episode_id, cell)

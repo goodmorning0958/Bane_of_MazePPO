@@ -1,0 +1,72 @@
+Regular Logistic Regression Results:
+                            Logit Regression Results
+================================================================================
+Dep. Variable:     final_success_binary   No. Observations:                   81
+Model:                            Logit   Df Residuals:                       76
+Method:                             MLE   Df Model:                            4
+Date:                  Sat, 24 Oct 2026   Pseudo R-squ.:                  0.3412
+Time:                          15:24:53   Log-Likelihood:                -36.951
+converged:                         True   LL-Null:                       -56.089
+Covariance Type:              nonrobust   LLR p-value:                 9.825e-08
+=======================================================================================
+                          coef    std err          z      P>|z|      [0.025      0.975]
+---------------------------------------------------------------------------------------
+const                  -3.0057      1.146     -2.623      0.009      -5.252      -0.760
+VARNumberOfRayCasts     0.0157      0.044      0.353      0.724      -0.071       0.103
+VARFOV                  0.0160      0.003      4.577      0.000       0.009       0.023
+VARAllowedEnergy       -0.0039      0.006     -0.676      0.499      -0.015       0.007
+VARtargetMaxTurn    -8.539e-18      0.252  -3.38e-17      1.000      -0.494       0.494
+=======================================================================================
+
+Regular Logistic Regression AIC: 83.90191361958273
+
+95% Confidence Intervals:
+                            0         1
+const               -5.251527 -0.759841
+VARNumberOfRayCasts -0.071198  0.102519
+VARFOV               0.009142  0.022834
+VARAllowedEnergy    -0.015136  0.007375
+VARtargetMaxTurn    -0.494470  0.494470
+
+Odds Ratios:
+const                  0.049505
+VARNumberOfRayCasts    1.015784
+VARFOV                 1.016117
+VARAllowedEnergy       0.996127
+VARtargetMaxTurn       1.000000
+dtype: float64
+
+Overall Success Rate:
+51.85185185185185 %
+ROC-AUC: 0.889
+Optimization terminated successfully.
+         Current function value: 0.374113
+         Iterations 8
+
+Logistic Regression with Interactions Results:
+                            Logit Regression Results
+===========================================================================
+Dep. Variable:     final_success_binary   No. Observations:                   81
+Model:                            Logit   Df Residuals:                       70
+Method:                             MLE   Df Model:                           10
+Date:                  Sat, 24 Oct 2026   Pseudo R-squ.:                  0.4597
+Time:                          15:24:53   Log-Likelihood:                -30.303
+converged:                         True   LL-Null:                       -56.089
+Covariance Type:              nonrobust   LLR p-value:                 1.369e-07
+====================================================================================================
+                                       coef    std err          z      P>|z|      [0.025      0.975]
+----------------------------------------------------------------------------------------------------
+const                                0.5460      0.455      1.200      0.230      -0.345       1.437
+VARNumberOfRayCasts                 -0.0335      0.065     -0.513      0.608      -0.162       0.095
+VARFOV                               0.0256      0.007      3.537      0.000       0.011       0.040
+VARAllowedEnergy                    -0.0102      0.009     -1.151      0.250      -0.028       0.007
+VARtargetMaxTurn                     0.2005      0.344      0.583      0.560      -0.474       0.875
+ray_count_fov                       -0.0020      0.001     -2.146      0.032      -0.004      -0.000
+energy_constraint_turn_sharpness     0.0084      0.006      1.329      0.184      -0.004       0.021
+ray_count_energy_constraint          0.0025      0.001      1.985      0.047    3.23e-05       0.005
+fov_turn_sharpness                   0.0020      0.004      0.544      0.587      -0.005       0.009
+ray_count_turn_sharpness            -0.0275      0.047     -0.591      0.555      -0.119       0.064
+fov_energy_constraint             4.868e-05   8.51e-05      0.572      0.567      -0.000       0.000
+====================================================================================================
+
+Interactions Logistic Regression AIC: 82.60625802042429
