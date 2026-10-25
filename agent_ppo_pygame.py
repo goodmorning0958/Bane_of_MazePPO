@@ -18,7 +18,7 @@ How it relates to agent_ppo.py
 Usage
     from main.py (same arguments as StartAgent, minus nothing):
         from agent_ppo_pygame import StartViewer
-        StartViewer("test", 48, 24, 24, 9000, 34, "orth", 0.5, 1, 360, None)
+        StartViewer("test", 48, 24, 24, 9000, 30, "orth", 0.5, 1, 360, None)
     or from a terminal in the project folder:
         python agent_ppo_pygame.py                              train and watch live
         python agent_ppo_pygame.py --start-x 51                 skip the empty-arena stage
@@ -46,7 +46,7 @@ import pygame
 
 from training_example_generator import get_new_training_example
 from RunIntoWall import RunIntoWall
-from actor_critic import ActorCritic, ADAPT_TURN_WEIGHT
+from actor_critic import ActorCritic, ADAPT_TURN_WEIGHT, RAY_SCALE
 from maze_utils import _build_bsp_tree
 from agent_ppo import (
     _compute_gae,
@@ -64,6 +64,7 @@ from agent_ppo import (
     STALL_WINDOW,
     STALL_MIN_DISPLACEMENT,
     STALL_END_PENALTY,
+    REWARD_SCALE,
 )
 
 # ---------------------------------------------------------------- look & feel
@@ -103,15 +104,18 @@ def lidar_rays(state, ray_offset, angle, ray_count, fov, max_distance):
 
     Returns [(world_angle, length, cast, hit)]. Uses the formulas of ActorCritic.GetState, so what is drawn
     is what the network saw (no second BSP traversal)."""
-    step = (2 * math.pi) / ray_count
     rays = []
-    nearest = int(np.argmin([abs((step * j + ray_offset - float(angle) + math.pi) % (2 * math.pi) - math.pi) for j in range(ray_count)]))
+    if ray_count == 1:
+        relative = [0.0]
+    elif fov >= 2 * math.pi - 1e-6:
+        relative = [(2 * math.pi) * i / ray_count - math.pi for i in range(ray_count)]
+    else:
+        relative = [fov * (i / (ray_count - 1) - 0.5) for i in range(ray_count)]
     for i in range(ray_count):
-        ray_angle = step * i + ray_offset
-        diff = abs((ray_angle - float(angle) + math.pi) % (2 * math.pi) - math.pi)
-        cast = diff <= fov / 2 or i == nearest
-        length = float(state[i]) * max_distance
-        rays.append((ray_angle, length, cast, bool(cast and length < max_distance - 1e-6)))
+        ray_angle = float(angle) + relative[i] + ray_offset
+        cast = True
+        length = float(state[i]) ** 2 * RAY_SCALE
+        rays.append((ray_angle, length, cast, bool(cast and length < min(max_distance, RAY_SCALE) - 1e-6)))
     return rays
 
 
@@ -391,7 +395,7 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
     stages = curriculum_stage_starts(network.k.item(), network.sd.item())
 
     def stage_of(x_value):
-        return max(i for i, start in enumerate(CURRICULUM_STAGES) if start <= x_value)
+        return CURRICULUM_STAGES.index(x_value) if x_value in CURRICULUM_STAGES else max([0] + [i for i, start in enumerate(CURRICULUM_STAGES) if start <= x_value])
 
     def episodes():
         x = int(start_difficulty)
@@ -450,6 +454,7 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
                 RegionsExplored.add(start_region)
 
             network.EnergyUsed = 0.0
+            network.last_action = [0.0, 0.0]
             robot_path = [robot_pos.copy()]
             episode_reward = 0.0
             episode_length = 0
@@ -501,13 +506,14 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
 
                 # params (old angle, angle, etc.)
                 old_angle = float(angle)
-                new_angle, step_size = float(Action[0]), float(Action[1])
+                new_angle, step_size = old_angle + float(Action[0]), float(Action[1])
                 # turn limit: no limit at success_rate 0, tightens to target_max_turn as the success rate rises
                 turn_limit = math.pi - (math.pi - VARtargetMaxTurn) * min(1.0, ramp_rate / TURN_LIMIT_SUCCESS)
                 turn = (new_angle - old_angle + math.pi) % (2 * math.pi) - math.pi
                 turn_excess = max(0.0, abs(turn) - turn_limit)    # how far past the limit the policy asked to turn
                 turn = max(-turn_limit, min(turn_limit, turn))
                 new_angle = (old_angle + turn + math.pi) % (2 * math.pi) - math.pi
+                network.last_action = [turn / math.pi, step_size / network.max_step]
 
                 # Virtually update robot stats without directional floor bias.
                 new_pos = (robot_pos + step_size * np.array([np.cos(new_angle), np.sin(new_angle)])).astype(np.float32)
@@ -536,7 +542,7 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
                 goal_distance = 0.0 if in_goal_pixel else next_distance_finish
 
                 # nearest wall the LiDAR saw this step, in pixels (rays outside the FOV hold the max distance, so they never win)
-                min_ray_px = min(State[:int(VARNumberOfRayCasts)]) * max_ray
+                min_ray_px = min(State[:int(VARNumberOfRayCasts)]) ** 2 * RAY_SCALE
 
                 # called by keyword, so it keeps working however reward()'s parameters are ordered; the optional ones are
                 # only passed if reward() has them
@@ -559,7 +565,7 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
 
                 # store episode data (training only)
                 if train:
-                    network.store_transition(State, LatentAction, Reward, log_prob, done, value, buffered_steps)
+                    network.store_transition(State, LatentAction, Reward * REWARD_SCALE, log_prob, done, value, buffered_steps)
                     buffered_steps += 1
 
                 # ---- publish the result of this step (drawn next frame)
@@ -574,7 +580,7 @@ def StartViewer(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinput
                 # update the robot (angle / position)
                 robot_pos, angle = new_pos, new_angle
                 if done:
-                    termination = "success" if maze_solved else ("collision" if run_into_wall else ("stalled" if stalled else "dead_end"))
+                    termination = "success" if maze_solved else ("collision" if run_into_wall else ("stalled" if stalled else ("dead_end" if in_dead_end else "battery")))
                     break
 
             if skipped:
@@ -795,6 +801,6 @@ if __name__ == "__main__":
     parser.add_argument("--sps", type=int, default=15, help="steps per second")
     parser.add_argument("--sampled", action="store_true", help="when watching a policy, sample actions instead of using the mean")
     args = parser.parse_args()
-    StartViewer("viewer", 48, 24, 24, 9000, 34, "orth", 0.5, 1, 180, None, seed=args.seed, policy_path=args.policy,
+    StartViewer("viewer", 48, 24, 24, 9000, 30, "orth", 0.5, 1, 180, None, seed=args.seed, policy_path=args.policy,
                 deterministic=(False if args.sampled else None), start_difficulty=args.start_x, steps_per_second=args.sps)
     sys.exit(0)

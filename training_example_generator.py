@@ -135,8 +135,10 @@ def get_new_training_example(training_steps, k=5.89, sd=20):
         probabilities = weights / np.sum(weights)
         chosen_distance = np.random.choice(grid_distances, p=probabilities)
         grid_distance = int(chosen_distance)
-        if training_steps in (51, 52):
-            grid_distance = 3 if training_steps == 51 else 2
+        if training_steps in (51, 52, 53):
+            grid_distance = {51: 3, 52: 2, 53: 1}[training_steps]
+        if training_steps in (55, 56):
+            maze_size, grid_distance = {55: (12, 1), 56: (14, 1)}[training_steps]
 
     if training_steps <= 50:
         x = np.arange(maze_size)

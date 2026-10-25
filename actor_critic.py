@@ -35,6 +35,9 @@ EXPLORE_BONUS = 0.1
 STALL_STEP_SIZE = 0.25     
 STALL_STEP_PENALTY = 0.2   
 OVER_BUDGET_PENALTY = 0.2 
+RAY_SCALE = 24.0
+LOG_STD_MIN = -2.0
+HARD_ENERGY_LIMIT = True
 
 class ActorCritic(nn.Module):
     def __init__(self, h1, h2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, VARFOV, inputs, action_dim=2):
@@ -45,6 +48,7 @@ class ActorCritic(nn.Module):
         self.VARAllowedEnergy = float(VARAllowedEnergy)
         
         self.EnergyUsed = 0.0
+        self.last_action = [0.0, 0.0]
         self.clear_memory(self.MaxSteps)
         # Actor network
 
@@ -58,6 +62,7 @@ class ActorCritic(nn.Module):
         self.crit2 = nn.Linear(h1, h2)
         self.val_out = nn.Linear(h2, 1)
 
+        # added a way for the AI to optimize its cirriculum
         self.k = nn.Parameter(torch.tensor(5.89), requires_grad=False)
         self.sd = nn.Parameter(torch.tensor(20.0), requires_grad=False)
 
@@ -66,6 +71,7 @@ class ActorCritic(nn.Module):
 
         # other optimizable parameters
         self.log_w_turn = nn.Parameter(torch.tensor(math.log(0.05)), requires_grad=ADAPT_TURN_WEIGHT)
+
         self.target_max_turn = float(VARtargetMaxTurn)
         self.FOV = _fov_to_radians(VARFOV)
         self.max_step = MAX_STEP_START
@@ -102,7 +108,7 @@ class ActorCritic(nn.Module):
         actor = torch.tanh(self.act1(state_tensor))
         actor = torch.tanh(self.act2(actor))
         mean = self.out(actor)
-        stds = self.log_std.clamp(-3.0, 1.0).exp()
+        stds = self.log_std.clamp(LOG_STD_MIN, 1.0).exp()
         critic = torch.tanh(self.crit1(state_tensor))
         critic = torch.tanh(self.crit2(critic))
         value = self.val_out(critic).squeeze(-1)
@@ -271,6 +277,8 @@ class ActorCritic(nn.Module):
         if in_dead_end:
             return float(reward - 5.0), DEAD_END_IS_TERMINAL, False
         if self.EnergyUsed > self.VARAllowedEnergy:
+            if HARD_ENERGY_LIMIT:
+                return float(reward - 5.0), True, False
             reward -= OVER_BUDGET_PENALTY
         if region_unexplored:
             reward += EXPLORE_BONUS
@@ -342,15 +350,14 @@ class ActorCritic(nn.Module):
         ray_offset = float(Rayangle.detach().item()) if torch.is_tensor(Rayangle) else float(Rayangle)
         fov = _fov_to_radians(VARFOV)
 
-        angle_step = (2 * math.pi) / ray_count
-        nearest_ray = int(np.argmin([abs((angle_step * j + ray_offset - float(angle) + math.pi) % (2 * math.pi) - math.pi) for j in range(ray_count)]))
+        if ray_count == 1:
+            relative_angles = [0.0]
+        elif fov >= 2 * math.pi - 1e-6:
+            relative_angles = [(2 * math.pi) * i / ray_count - math.pi for i in range(ray_count)]
+        else:
+            relative_angles = [fov * (i / (ray_count - 1) - 0.5) for i in range(ray_count)]
         for i in range(ray_count):
-            ray_angle = angle_step * i + ray_offset
-            angle_difference = abs((ray_angle - float(angle) + math.pi) % (2 * math.pi) - math.pi)
-            if angle_difference > fov / 2 and i != nearest_ray:
-                distances.append(max_distance)
-                continue
-
+            ray_angle = float(angle) + relative_angles[i] + ray_offset
             ray_vec = np.array([np.cos(ray_angle), np.sin(ray_angle)], dtype=np.float32)
             self.last_rays_cast += 1
             raw_distance = raycaster_env.traverse_tree(bsp, robot_pos, ray_vec)
@@ -368,14 +375,11 @@ class ActorCritic(nn.Module):
                max_ray_angle = ray_angle
                max_ray_distance = final_distance
             
-        goal_delta = (np.asarray(end_point) - np.asarray(robot_pos)) / max(float(maze_size), 1e-6)
         energy_remaining = max(0.0, 1.0 - self.EnergyUsed / self.VARAllowedEnergy)
-        heading = self.wrap(float(angle))
         angle_finish = self.wrap(math.atan2(end_point[1] - robot_pos[1], end_point[0] - robot_pos[0]) - float(angle))
-        distance_finish = float(np.linalg.norm(end_point - robot_pos)) / max(float(maze_size), 1e-6)
+        distance_finish = float(np.linalg.norm(end_point - robot_pos)) / RAY_SCALE
 
-        return [d / max_distance for d in distances] + [
-            float(goal_delta[0]), float(goal_delta[1]),
-            math.sin(heading), math.cos(heading), heading / math.pi, energy_remaining,
-            math.sin(angle_finish), math.cos(angle_finish), angle_finish / math.pi, distance_finish,
+        return [math.sqrt(min(1.0, d / RAY_SCALE)) for d in distances] + [
+            energy_remaining, math.sin(angle_finish), math.cos(angle_finish), distance_finish,
+            float(self.last_action[0]), float(self.last_action[1]),
         ], max_ray_angle

@@ -36,6 +36,9 @@ from actor_critic import (
     STALL_STEP_SIZE,
     STALL_STEP_PENALTY,
     OVER_BUDGET_PENALTY,
+    RAY_SCALE,
+    LOG_STD_MIN,
+    HARD_ENERGY_LIMIT,
 )
 from maze_utils import raycaster_env, _fov_to_radians, _build_bsp_tree
 
@@ -49,14 +52,15 @@ MINIBATCH_SIZE = 64
 TARGET_KL = 0.02
 LEARNING_RATE = 3e-4
 ENTROPY_COEF = 0.01
+REWARD_SCALE = 0.2
 CURRICULUM_ENABLED = True
 TURN_LIMIT_SUCCESS = 0.4  
 MIN_ROLLOUT_STEPS_LEARNING = 512   
 CURRICULUM_WINDOW = 50             
 CURRICULUM_PROMOTE = 0.6           
 CURRICULUM_DEMOTE = 0.1            
-CURRICULUM_STAGES = [0, 7, 20, 30, 40, 50, 51, 54]
-KEEP_RAMP_FROM_STAGE = 5
+CURRICULUM_STAGES = [30, 40, 50, 51, 52, 54, 55, 56, 53]
+KEEP_RAMP_FROM_STAGE = 2
 STALL_WINDOW = 20                  
 STALL_MIN_DISPLACEMENT = 2.0     
 STALL_END_PENALTY = 1.0
@@ -124,7 +128,7 @@ def _ppo_update(network, optimizer, ppo_parameters, states, actions, log_probs, 
             optimizer.step()
 
             with torch.no_grad():
-                network.log_std.clamp_(-3.0, 1.0)
+                network.log_std.clamp_(LOG_STD_MIN, 1.0)
                 clip_fraction = ((probability_ratio - 1.0).abs() > 0.2).float().mean()
 
             diagnostics.append([
@@ -196,7 +200,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
     directory = Path(output_dir) if output_dir is not None else Path("runs") / f"agent_{agnt}_seed_{seed}_{time.time_ns()}"
     directory.mkdir(parents=True, exist_ok=True)
     config_path = directory / f"RunConfig_{agnt}.json"
-    x = 0
+    x = CURRICULUM_STAGES[0]
     success_rate = 0.0
     episode_count = 0
     past = 0
@@ -238,6 +242,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
                   clearance_distance=CLEARANCE_DISTANCE, visit_penalty=VISIT_PENALTY, visit_cap=VISIT_CAP,
                   explore_bonus=EXPLORE_BONUS, stall_step_size=STALL_STEP_SIZE, stall_step_penalty=STALL_STEP_PENALTY,
                   over_budget_penalty=OVER_BUDGET_PENALTY,
+                  reward_scale=REWARD_SCALE, hard_energy_limit=HARD_ENERGY_LIMIT, log_std_min=LOG_STD_MIN, ray_scale=RAY_SCALE,
                   param_count=sum(p.numel() for p in network.parameters()),
                   actor_param_count=sum(p.numel() for m in (network.act1, network.act2, network.out) for p in m.parameters()),
                   actor_macs_per_inference=int(network.inputs * NNh1 + NNh1 * NNh2 + NNh2 * 2),
@@ -325,6 +330,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             RegionsExplored.add(start_region)
 
         network.EnergyUsed = 0.0
+        network.last_action = [0.0, 0.0]
         robot_path = [robot_pos.copy()]
         episode_reward = 0.0
         episode_length = 0
@@ -363,7 +369,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
 
             # params (old angle, angle, etc.)
             old_angle = float(angle)
-            new_angle, step_size = float(Action[0]), float(Action[1])
+            new_angle, step_size = old_angle + float(Action[0]), float(Action[1])
 
             # added a way for early training for energy efficiency to 
             turn_limit = math.pi - (math.pi - VARtargetMaxTurn) * min(1.0, ramp_rate / TURN_LIMIT_SUCCESS)
@@ -371,6 +377,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             turn_excess = max(0.0, abs(turn) - turn_limit)    # how far past the limit the policy asked to turn
             turn = max(-turn_limit, min(turn_limit, turn))
             new_angle = (old_angle + turn + math.pi) % (2 * math.pi) - math.pi
+            network.last_action = [turn / math.pi, step_size / network.max_step]
 
             # Virtually update robot stats 
             new_pos = (robot_pos + step_size * np.array([np.cos(new_angle), np.sin(new_angle)])).astype(np.float32)
@@ -401,7 +408,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             goal_distance = 0.0 if in_goal_pixel else next_distance_finish
 
             # nearest wall the LiDAR saw this step, in pixels (rays outside the FOV hold the max distance, so they never win)
-            min_ray_px = min(State[:int(VARNumberOfRayCasts)]) * ray_range
+            min_ray_px = min(State[:int(VARNumberOfRayCasts)]) ** 2 * RAY_SCALE
 
             Reward, done, maze_solved = network.reward(
                 distance_progress, run_into_wall, in_dead_end, goal_distance,
@@ -420,7 +427,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             penalty_sum += network.last_total_penalty
 
             # store episode data
-            network.store_transition(State, LatentAction, Reward, log_prob, done, value, buffered_steps)
+            network.store_transition(State, LatentAction, Reward * REWARD_SCALE, log_prob, done, value, buffered_steps)
             buffered_steps += 1
 
             # action data log
@@ -431,7 +438,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             # update the robot (angle / position)
             robot_pos, angle = new_pos, new_angle
             if done:
-                termination = "success" if maze_solved else ("collision" if run_into_wall else ("stalled" if stalled else "dead_end"))
+                termination = "success" if maze_solved else ("collision" if run_into_wall else ("stalled" if stalled else ("dead_end" if in_dead_end else "battery")))
                 break
             if ACTION_DELAY_SECONDS > 0:
                 time.sleep(ACTION_DELAY_SECONDS)

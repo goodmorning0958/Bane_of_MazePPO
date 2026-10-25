@@ -18,12 +18,12 @@ import torch
 
 EPISODES = 100000
 SEEDS = [42]
-MACHINE = 1        # set this to 1, 2 or 3 on each computer (1 = your PC, 2 = the Mac, 3 = the other Windows PC)
-JOBS_BY_MACHINE = {1: range(0, 52), 2: range(52, 66), 3: range(66, 81)}   # which agents each computer runs
-MAX_WORKERS = None   # agents run at once on this computer; None = every core, or set a number (e.g. 6) to run cooler
+MACHINE = 1        # set this to 1, 2, 3 or 4 on each computer (1 = your PC, 2 = the Mac, 3 = the other Windows PC, 4 = the fourth computer)
+JOBS_BY_MACHINE = {1: range(0, 21), 2: range(21, 41), 3: range(41, 61), 4: range(61, 81)}   # which agents each computer runs
+MAX_WORKERS = 7   # agents run at once on this computer; None = every core, or set a number (e.g. 6) to run cooler
 AGENTS = None
 JOBS = [i for i in JOBS_BY_MACHINE[MACHINE] if AGENTS is None or i in AGENTS]
-OUT = Path("runs") / "sweep_81_MAZES"
+OUT = Path("runs") / "sweep_81_v5"
 STOP_AT = None  
 STOP_FILE = OUT / "STOP"   
 
@@ -72,14 +72,12 @@ def run_job(job):
     summary_file = directory / f"Summary_sweep_{job['index']}.json"
     if summary_file.exists() and json.loads(summary_file.read_text(encoding="utf-8"))["episodes"] >= job["episodes"]:
         return job["index"]
-    if not (directory / "checkpoint.pt").exists():
-        return job["index"]
     if (job["stop_at"] and time.time() >= job["stop_at"]) or Path(job["stop_file"]).exists():
         return job["index"]
     agent_ppo.STOP_AT, agent_ppo.STOP_FILE = job["stop_at"], job["stop_file"]
     try:
         set_constants({**CONSTANTS, **job["params"]})
-        StartAgent("sweep_", p["NNh1"], p["NNh2"], p["VARNumberOfRayCasts"], p["VARAllowedEnergy"], p["VARNumberOfRayCasts"] + 10,
+        StartAgent("sweep_", p["NNh1"], p["NNh2"], p["VARNumberOfRayCasts"], p["VARAllowedEnergy"], p["VARNumberOfRayCasts"] + 6,
                    p["VARWeightInitType"], p["VARtargetMaxTurn"], job["index"], p["VARFOV"], p["VARRayDistance"],
                    seed=job["seed"], rollouts=job["episodes"], output_dir=directory)
     except Exception:
