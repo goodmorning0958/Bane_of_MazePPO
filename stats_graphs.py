@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-data = pd.read_csv('metadataabit.csv')
+data = pd.read_csv('metadata.csv')
 
 required_columns = ['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn', 'final_success_binary']
 assert all(col in data.columns for col in required_columns)
@@ -13,7 +13,7 @@ configurations_groups = data.groupby(['VARNumberOfRayCasts', 'VARFOV', 'VARAllow
 
 configurations_groups['success_rate'] *= 100
 
-converting_to_read = [('VARNumberOfRayCasts', 'Ray Count'), ('VARFOV', 'Field of View (Degrees)'), ('VARAllowedEnergy', 'Energy Constraint'), ('VARtargetMaxTurn', 'Turn Sharpness')]
+converting_to_read = [('VARNumberOfRayCasts', 'Ray Count'), ('VARFOV', 'Field of View (Degrees)'), ('VARAllowedEnergy', 'Allowed Energy'), ('VARtargetMaxTurn', 'Turn Sharpness')]
 for column, readable_name in converting_to_read:
     plt.figure(figsize=(8, 5))
     plt.scatter(configurations_groups[column], configurations_groups['success_rate'])
