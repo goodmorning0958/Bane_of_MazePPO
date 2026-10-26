@@ -1,0 +1,17 @@
+Traceback (most recent call last):
+  File "C:\Users\kaanc\source\repos\Bane_of_MazePPO\main.py", line 81, in run_job
+    StartAgent("sweep_", p["NNh1"], p["NNh2"], p["VARNumberOfRayCasts"], p["VARAllowedEnergy"], p["VARNumberOfRayCasts"] + 6,
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+               p["VARWeightInitType"], p["VARtargetMaxTurn"], job["index"], p["VARFOV"], p["VARRayDistance"],
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+               seed=job["seed"], rollouts=job["episodes"], output_dir=directory)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kaanc\source\repos\Bane_of_MazePPO\agent_ppo.py", line 492, in StartAgent
+    network.LogDataToCSV(Episode_Payload, None, None, "ep", agnt, directory, test)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kaanc\AppData\Local\Python\pythoncore-3.13-64\Lib\site-packages\torch\utils\_contextlib.py", line 124, in decorate_context
+    return func(*args, **kwargs)
+  File "C:\Users\kaanc\source\repos\Bane_of_MazePPO\actor_critic.py", line 310, in LogDataToCSV
+    with open(Path(directory) / f"EpisodeData_{test}{agnt_id}.csv", mode="a", newline="", encoding="utf-8") as file:
+         ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [Errno 13] Permission denied: 'runs\\sweep_81_v5\\agent_063_seed_42\\EpisodeData_sweep_63.csv'
