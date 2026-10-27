@@ -177,13 +177,11 @@ def _write_summary(path, history, config, start_time):
     )
     path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
-# checkpoint / resume (main.py sets STOP_AT and STOP_FILE for each agent)
-CHECKPOINT_EVERY = 1000     # episodes between automatic checkpoints
-STOP_AT = None              # unix time after which the agent saves a checkpoint and stops
-STOP_FILE = None            # if this file exists the agent saves a checkpoint and stops
+CHECKPOINT_EVERY = 1000     
+STOP_AT = None             
+STOP_FILE = None            
 
 def _trim_csv(path, column, keep):
-    # drop log rows written after the checkpoint (only matters after a crash)
     with open(path, newline="", encoding="utf-8") as f:
         rows = list(csv.reader(f))
     rows = rows[:1] + [r for r in rows[1:] if keep(float(r[column]))]
@@ -264,7 +262,6 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
                        "rolling_success", "ramp_rate", "max_step_cap", "stage", "rollout_target"],
     }
 
-    # resume from a checkpoint if there is one in this folder
     checkpoint_path = directory / "checkpoint.pt"
     resumed = checkpoint_path.exists()
     if resumed:
@@ -364,9 +361,6 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             Action, log_prob, value, LatentAction, _ = network.get_action_and_value(State)
             inference_seconds += time.perf_counter() - inference_start
 
-            # Update the agent viewer
-            #Dashboard.send([[Action]], walls)
-
             # params (old angle, angle, etc.)
             old_angle = float(angle)
             new_angle, step_size = old_angle + float(Action[0]), float(Action[1])
@@ -401,22 +395,21 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             if region_unexplored:
                 RegionsExplored.add(region_tuple)
 
-            # Get reward
             next_distance_finish = float(np.linalg.norm(end_point - new_pos))
             distance_progress = distance_finish - next_distance_finish
             in_goal_pixel = bool(np.all(np.floor(new_pos / grid_distance) == np.floor(end_point / grid_distance)))
             goal_distance = 0.0 if in_goal_pixel else next_distance_finish
 
-            # nearest wall the LiDAR saw this step, in pixels (rays outside the FOV hold the max distance, so they never win)
             min_ray_px = min(State[:int(VARNumberOfRayCasts)]) ** 2 * RAY_SCALE
 
+            # Get reward
             Reward, done, maze_solved = network.reward(
                 distance_progress, run_into_wall, in_dead_end, goal_distance,
                 region_unexplored, VARRayDistance, new_pos, step_size, energy_ramp_rate,
                 old_angle, new_angle, maze_size, done, min_ray_px, turn_excess, current_pixel_visits
             )
 
-            # end hopeless episodes early: almost no net movement over the last STALL_WINDOW steps
+            # prevent stalling
             if not done and len(robot_path) > STALL_WINDOW and \
                     np.linalg.norm(new_pos - robot_path[-1 - STALL_WINDOW]) < STALL_MIN_DISPLACEMENT:
                 Reward -= STALL_END_PENALTY
@@ -430,12 +423,6 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             network.store_transition(State, LatentAction, Reward * REWARD_SCALE, log_prob, done, value, buffered_steps)
             buffered_steps += 1
 
-            # action data log
-            #network.LogDataToCSV(None, [float(Action[0]), float(Action[1]), float(value), Reward,
-           #                            network.last_total_penalty, network.last_raw_energy,
-            #                           network.last_energy_component, network.last_turn_component,
-            #                           network.last_time_component], None, "act", agnt, directory, test)
-            # update the robot (angle / position)
             robot_pos, angle = new_pos, new_angle
             if done:
                 termination = "success" if maze_solved else ("collision" if run_into_wall else ("stalled" if stalled else ("dead_end" if in_dead_end else "battery")))
@@ -544,7 +531,6 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
         buffer_episode_rewards, buffer_episode_steps = [], []
         _write_summary(directory / f"Summary_{test}{agnt}.json", history, config, start_time)
 
-        # checkpoint: every CHECKPOINT_EVERY episodes, and when it is time to stop
         stopping = (STOP_AT is not None and time.time() >= STOP_AT) or (STOP_FILE is not None and os.path.exists(STOP_FILE))
         if _rollout != rollouts - 1 and (stopping or episode_count - last_checkpoint >= CHECKPOINT_EVERY):
             torch.save({"model": network.state_dict(), "optimizer": optimizer.state_dict(),

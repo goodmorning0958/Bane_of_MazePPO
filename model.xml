@@ -1,0 +1,61 @@
+<mujoco model="small_model_car_30x30_chassis">
+  <compiler angle="radian"/>
+  <option gravity="0 0 -9.81" timestep="0.001" integrator="implicitfast"
+          cone="elliptic" solver="Newton" iterations="60" tolerance="1e-10"/>
+  <size nuserdata="1072"/>
+  <worldbody>
+    <geom name="floor" type="plane" pos="0 0 0" size="20 20 0.1"
+          rgba="0.5 0.5 0.5 1" friction="0.1 0.002 0.02" condim="3"/>
+    <body name="car" pos="0 0 0.08">
+      <freejoint name="car_root"/>
+      <inertial pos="0 0 0" mass="0.5"
+                diaginertia="0.004016666667 0.004016666667 0.007500000000"/>
+      <geom name="box" type="box" size="0.15 0.15 0.04" rgba="1 0 0 1"
+            contype="1" conaffinity="1"/>
+      <body name="FLWheel" pos="0.10 0.18 -0.04">
+        <joint name="fl_wheel" type="hinge" axis="0 1 0"/>
+        <inertial pos="0 0 0" mass="0.05"
+                  diaginertia="0.000030416667 0.000040 0.000030416667"/>
+        <geom name="fl_tire" type="cylinder" size="0.04 0.025"
+              euler="1.5707963267948966 0 0"/>
+      </body>
+      <body name="FRWheel" pos="0.10 -0.18 -0.04">
+        <joint name="fr_wheel" type="hinge" axis="0 1 0"/>
+        <inertial pos="0 0 0" mass="0.05"
+                  diaginertia="0.000030416667 0.000040 0.000030416667"/>
+        <geom name="fr_tire" type="cylinder" size="0.04 0.025"
+              euler="1.5707963267948966 0 0"/>
+      </body>
+      <body name="BLWheel" pos="-0.10 0.18 -0.04">
+        <joint name="bl_wheel" type="hinge" axis="0 1 0"/>
+        <inertial pos="0 0 0" mass="0.05"
+                  diaginertia="0.000030416667 0.000040 0.000030416667"/>
+        <geom name="bl_tire" type="cylinder" size="0.04 0.025"
+              euler="1.5707963267948966 0 0"/>
+      </body>
+      <body name="BRWheel" pos="-0.10 -0.18 -0.04">
+        <joint name="br_wheel" type="hinge" axis="0 1 0"/>
+        <inertial pos="0 0 0" mass="0.05"
+                  diaginertia="0.000030416667 0.000040 0.000030416667"/>
+        <geom name="br_tire" type="cylinder" size="0.04 0.025"
+              euler="1.5707963267948966 0 0"/>
+      </body>
+    </body>
+  </worldbody>
+  <contact>
+    <pair name="fl_ground" geom1="floor" geom2="fl_tire" condim="6"
+          friction="0.7 0.7 0.001 0.0008 0.0008" solref="0.01 1"/>
+    <pair name="fr_ground" geom1="floor" geom2="fr_tire" condim="6"
+          friction="0.7 0.7 0.001 0.0008 0.0008" solref="0.01 1"/>
+    <pair name="bl_ground" geom1="floor" geom2="bl_tire" condim="6"
+          friction="0.7 0.7 0.001 0.0008 0.0008" solref="0.01 1"/>
+    <pair name="br_ground" geom1="floor" geom2="br_tire" condim="6"
+          friction="0.7 0.7 0.001 0.0008 0.0008" solref="0.01 1"/>
+  </contact>
+  <actuator>
+    <motor name="flmotor" joint="fl_wheel" gear="1" ctrllimited="false"/>
+    <motor name="frmotor" joint="fr_wheel" gear="1" ctrllimited="false"/>
+    <motor name="blmotor" joint="bl_wheel" gear="1" ctrllimited="false"/>
+    <motor name="brmotor" joint="br_wheel" gear="1" ctrllimited="false"/>
+  </actuator>
+</mujoco>

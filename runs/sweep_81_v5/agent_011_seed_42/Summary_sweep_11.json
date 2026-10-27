@@ -1,0 +1,23 @@
+{
+  "episodes": 100000,
+  "wall_seconds": 33868.68339480006,
+  "last_window_success_rate": 0.35,
+  "last_window_path_efficiency": 0.3184281316967552,
+  "last_window_accuracy": 0.6375979872028821,
+  "last_window_energy_per_success": 17.69780899073729,
+  "last_window_energy_per_length": 1.42071690673974,
+  "last_window_rays_per_episode": 432.24,
+  "last_window_steps_per_episode": 17.01,
+  "total_energy": 1764847.3865515864,
+  "total_rays": 45611256,
+  "total_sensing_units": 93611647.19999997,
+  "total_lidar_seconds": 3673.7324229999795,
+  "total_inference_seconds": 999.2020624799188,
+  "successes": 36507,
+  "success_energy_median": 22.684820187278092,
+  "success_energy_p90": 35.40311494357885,
+  "suggested_energy_budget": 45.4,
+  "param_count": 5409,
+  "actor_param_count": 2714,
+  "actor_macs_per_inference": 2640
+}
