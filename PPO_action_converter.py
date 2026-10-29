@@ -1,7 +1,6 @@
 import struct
 import math
-
-ENERGY_PER_RADIAN = 0.5
+from energy_lookup_table import move_joules
 
 def ConvertRobotAction(Action: list[float], done) -> list[list[int]]:
     LWP3Packet = []
@@ -18,7 +17,7 @@ def ConvertRobotAction(Action: list[float], done) -> list[list[int]]:
         VLeft = int(VBase * (1.0 - 2.0 * (min(1.0, abs(dir_)/(math.pi/4)))))
         VRight = VBase
 
-    Penalty = float(step_size) + ENERGY_PER_RADIAN * abs(float(dir_))
+    Penalty = move_joules(dir_, step_size)
 
     if VLeft < 0:
         VLeft = int(round((~VLeft & 255) + 1))

@@ -18,9 +18,9 @@ import torch
 
 EPISODES = 100000
 SEEDS = [42]
-MACHINE = 1        # set this to 1, 2 or 3 on each computer (1 = your PC, 2 = the Mac, 3 = the other Windows PC)
-JOBS_BY_MACHINE = {1: range(0, 20), 2: range(20, 40), 3: range(40, 81)}   # which agents each computer runs
-MAX_WORKERS_BY_MACHINE = {1: 7, 2: 7, 3: 15}   # agents run at once on each computer; None = every core, or set a number (e.g. 6) to run cooler
+MACHINE = 1        
+JOBS_BY_MACHINE = {1: range(0, 20), 2: range(20, 40), 3: range(40, 81)}   
+MAX_WORKERS_BY_MACHINE = {1: 7, 2: 7, 3: 15}   
 MAX_WORKERS = MAX_WORKERS_BY_MACHINE[MACHINE]
 AGENTS = None
 JOBS = [i for i in JOBS_BY_MACHINE[MACHINE] if AGENTS is None or i in AGENTS]

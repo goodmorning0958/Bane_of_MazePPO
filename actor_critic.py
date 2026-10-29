@@ -236,8 +236,8 @@ class ActorCritic(nn.Module):
 
         # normalised by the maze size, like the progress reward, so the energy penalty is a fixed fraction of what a
         # straight step toward the goal earns (and does not change when the energy budget is changed)
-        energy_scale = max(float(maze_size), 1e-6)
-        self.last_energy_component = float(c1 * raw_energy / energy_scale)
+
+        self.last_energy_component = float(c1 * raw_energy / maze_size)
         self.last_turn_component = float(c2 * turn_cost)
         self.last_time_component = float(c3 * compute_time)
         self.last_total_penalty = float(
