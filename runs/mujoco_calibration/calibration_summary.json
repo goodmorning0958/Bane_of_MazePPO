@@ -1,0 +1,38 @@
+{
+  "unit_m": 0.5,
+  "pwm": 0.6,
+  "trials": 10,
+  "moves": 2320,
+  "seed": 42,
+  "model_1": {
+    "formula": "E = a*distance + b*turn",
+    "a_J_per_unit": 0.8901732876592197,
+    "b_J_per_rad": 1.2073745382464707,
+    "ENERGY_PER_RADIAN": 1.3563365189505479,
+    "r2": 0.9299073171177318,
+    "rmse_J": 0.24863243417542766
+  },
+  "model_2": {
+    "formula": "E = a*distance + b*turn + c",
+    "a_J_per_unit": 0.4544770759850058,
+    "b_J_per_rad": 0.9897507751196184,
+    "c_J_per_move": 0.45742817508588485,
+    "ENERGY_PER_RADIAN": 2.177779314775103,
+    "ENERGY_PER_MOVE": 1.0064933948417156,
+    "r2": 0.9865744579701786,
+    "rmse_J": 0.10881464621166936
+  },
+  "model_3": {
+    "formula": "E = a*distance + b*turn + c_drive*[moved] + c_turn*[turned]",
+    "a_J_per_unit": 0.30166732032612786,
+    "b_J_per_rad": 1.0228011152605105,
+    "c_drive_J": 0.6178598836788144,
+    "c_turn_J": 0.3879589380899062,
+    "r2": 0.9895927983645997,
+    "rmse_J": 0.09580505501117186
+  },
+  "current_rule": {
+    "ENERGY_PER_RADIAN": 0.5
+  },
+  "minutes": 11.938304051667123
+}

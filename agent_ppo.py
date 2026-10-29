@@ -155,6 +155,7 @@ def _write_summary(path, history, config, start_time):
     last = history[-SUMMARY_SUCCESS_WINDOW:]
     last_wins = [h for h in last if h["success"]]
     win_energy = sorted(h["energy"] for h in wins)
+
     summary = dict(
         episodes=len(history), wall_seconds=time.perf_counter() - start_time,
         last_window_success_rate=mean([h["success"] for h in last]),
@@ -175,11 +176,7 @@ def _write_summary(path, history, config, start_time):
         param_count=config["param_count"], actor_param_count=config["actor_param_count"],
         actor_macs_per_inference=config["actor_macs_per_inference"],
     )
-    path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-
-CHECKPOINT_EVERY = 1000     
-STOP_AT = None             
-STOP_FILE = None            
+    path.write_text(json.dumps(summary, indent=2), encoding="utf-8")    
 
 def _trim_csv(path, column, keep):
     with open(path, newline="", encoding="utf-8") as f:
@@ -283,7 +280,6 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
         _trim_csv(directory / f"EpisodeData_{test}{agnt}.csv", 0, lambda v: v < episode_count)
         _trim_csv(directory / f"TrainingData_{test}{agnt}.csv", 0, lambda v: v <= episode_count)
         _trim_csv(directory / f"UpdateData_{test}{agnt}.csv", 0, lambda v: v <= episode_count)
-    last_checkpoint = episode_count
 
     if not resumed:
         for name, header in headers.items():
@@ -297,6 +293,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
     buffer_turn_total = 0.0
     buffer_episode_rewards, buffer_episode_steps = [], []
     for _rollout in range(episode_count, rollouts):
+        
         # get training example
         start_point, end_point, maze_size, grid_distance, walls, pixel_grid = get_new_training_example(x, network.k, network.sd)
         robot_pos = np.array(start_point, dtype=np.float32)
@@ -499,7 +496,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             continue
 
         # TRAINING PPO LOOP
-        update_start = time.perf_counter() # (todo measure time and for biggest bottlenecks)
+        update_start = time.perf_counter() 
         diagnostics, final_kl, kl_stopped, explained_variance = _ppo_update(
             network, optimizer, ppo_parameters, network.states[:buffered_steps], network.actions[:buffered_steps],
             network.log_probs[:buffered_steps], torch.cat(buffered_returns), torch.cat(buffered_advantages))
@@ -530,20 +527,6 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
         buffer_turn_total = 0.0
         buffer_episode_rewards, buffer_episode_steps = [], []
         _write_summary(directory / f"Summary_{test}{agnt}.json", history, config, start_time)
-
-        stopping = (STOP_AT is not None and time.time() >= STOP_AT) or (STOP_FILE is not None and os.path.exists(STOP_FILE))
-        if _rollout != rollouts - 1 and (stopping or episode_count - last_checkpoint >= CHECKPOINT_EVERY):
-            torch.save({"model": network.state_dict(), "optimizer": optimizer.state_dict(),
-                        "w_optimizer": w_optimizer.state_dict() if w_optimizer is not None else None,
-                        "x": x, "stage": stage, "ramp_rate": ramp_rate, "energy_ramp_rate": energy_ramp_rate,
-                        "past": past, "not_past": not_past, "success_rate": success_rate, "episode_count": episode_count,
-                        "recent_outcomes": list(recent_outcomes), "stage_outcomes": list(stage_outcomes), "history": history,
-                        "elapsed": time.perf_counter() - start_time, "python_rng": random.getstate(),
-                        "numpy_rng": np.random.get_state(), "torch_rng": torch.get_rng_state()}, directory / "checkpoint.tmp")
-            os.replace(directory / "checkpoint.tmp", checkpoint_path)
-            last_checkpoint = episode_count
-            if stopping:
-                return
 
     # added a way to save the model's state
     torch.save({"model_state_dict": network.state_dict(), "config": config, "max_step": network.max_step}, directory / f"Policy_{agnt}.pt")
