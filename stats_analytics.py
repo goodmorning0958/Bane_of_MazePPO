@@ -34,24 +34,39 @@ def logistic_regression(data):
 
     return result
 
-def extra_stats(result, data):
-    confidence_intervals = result.conf_int()
+def logistic_regression_for_training(data):
+    X = data[['episode']]
+    X = sm.add_constant(X)
 
+    y = data['success']
+
+    model = sm.Logit(y, X)
+    result = model.fit()
+
+    return result
+
+def extra_stats(result, data):
     odds_ratios = np.exp(result.params)
 
-    success_rate = data['final_success_binary'].mean() * 100
-
-    print("\n95% Confidence Intervals:")
-    print(confidence_intervals)
-
     print("\nOdds Ratios:")
-    print(odds_ratios)
-
-    print("\nOverall Success Rate:")
-    print(success_rate, "%")
+    print(odds_ratios) #idk why i kept this it just gives the odds ratios, it used to have more stuff but i deleted it because it was done in oter functions
 
 def roc_auc(result, data):
     X = data[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn']]
+    X = sm.add_constant(X)
+
+    y = data['final_success_binary']
+    predicted_probability = result.predict(X)
+
+    auc = roc_auc_score(y, predicted_probability)
+    fpr, tpr, thresholds = roc_curve(y, predicted_probability)
+
+    print(f"ROC-AUC: {auc:.3f}")
+
+    return fpr, tpr, thresholds, auc
+
+def roc_auc_for_interactions(result, data):
+    X = data[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn', 'ray_count_fov', 'energy_constraint_turn_sharpness', 'ray_count_energy_constraint', 'fov_turn_sharpness', 'ray_count_turn_sharpness', 'fov_energy_constraint']]
     X = sm.add_constant(X)
 
     y = data['final_success_binary']
@@ -87,17 +102,43 @@ def interactions_logistic_regression(data):
 
     return result
 
-def bootstrap_sampling(success, iterations=10000):
+def bootstrap_success_rate(success, iterations=10000):
     success = np.asarray(success)
 
     bootstrap_rates = []
 
     for i in range(iterations):
         bootstrap_sample = np.random.choice(success, size=len(success), replace=True)
-
         bootstrap_rates.append(bootstrap_sample.mean())
 
     lower_percentitle = np.percentile(bootstrap_rates, 2.5)
     upper_percentitle = np.percentile(bootstrap_rates, 97.5)
 
     return bootstrap_rates.mean(), lower_percentitle, upper_percentitle
+
+def bootstrap_odds_ratios(data, iterations=10000):
+    variables = ['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn']
+    bootstrap_ratios = []
+
+    for i in range(iterations):
+        bootstrap_sample = np.random.choice(len(data), size=len(data), replace=True)
+        bootstrap_samples = data.iloc[bootstrap_sample]
+
+        X = sm.add_constant(bootstrap_samples[variables])
+        y = bootstrap_samples['success']
+
+        try:
+            model = sm.Logit(y, X)
+            result = model.fit(disp=0)
+
+            odds_ratios = np.exp(result.params[variables])
+            bootstrap_ratios.append(odds_ratios)
+        except Exception:
+            continue
+
+    bootstrap_ratios = np.asarray(bootstrap_ratios)
+
+    lower_percentitle = np.percentile(bootstrap_ratios, 2.5, axis=0)
+    upper_percentitle = np.percentile(bootstrap_ratios, 97.5, axis=0)
+
+    return {variable: {'lower_percentitle': lower, 'upper_percentitle': upper} for variable, lower, upper in zip(variables, lower_percentitle, upper_percentitle)}
