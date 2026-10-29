@@ -5,7 +5,7 @@ import statsmodels.api as sm
 import pandas as pd
 
 def precision_analysis(p, e):
-    n = np.round((1.96**2*p*(1-p))/e**2).astype(int)
+    n = np.ciel((1.96**2*p*(1-p))/e**2)
     return n
 
 def latin_hypercube_sampling(samples):
@@ -14,8 +14,8 @@ def latin_hypercube_sampling(samples):
 
     ray_count = np.round(qmc.scale(sampling[:, 0:1], [4], [128])).astype(int).flatten()
     fov = qmc.scale(sampling[:, 1:2], [45], [360]).flatten()
-    energy_constraint = qmc.scale(sampling[:, 3:4], [30], [100]).flatten()
-    turn_sharpness = qmc.scale(sampling[:, 4:5], [15], [360]).flatten()
+    energy_constraint = qmc.scale(sampling[:, 2:3], [30], [100]).flatten()
+    turn_sharpness = qmc.scale(sampling[:, 3:4], [15], [360]).flatten()
     
     lhs_configurations = []
     for i in range(samples):
@@ -111,6 +111,8 @@ def bootstrap_success_rate(success, iterations=10000):
         bootstrap_sample = np.random.choice(success, size=len(success), replace=True)
         bootstrap_rates.append(bootstrap_sample.mean())
 
+    bootstrap_rates = np.asarray(bootstrap_rates)
+
     lower_percentitle = np.percentile(bootstrap_rates, 2.5)
     upper_percentitle = np.percentile(bootstrap_rates, 97.5)
 
@@ -125,7 +127,7 @@ def bootstrap_odds_ratios(data, iterations=10000):
         bootstrap_samples = data.iloc[bootstrap_sample]
 
         X = sm.add_constant(bootstrap_samples[variables])
-        y = bootstrap_samples['success']
+        y = bootstrap_samples['final_success_binary']
 
         try:
             model = sm.Logit(y, X)
