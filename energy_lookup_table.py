@@ -1,7 +1,7 @@
 import csv
 import numpy as np
 
-with open("runs/mujoco_calibration/calibration_moves.csv", newline="") as f:
+with open("runs/physics_calibration/calibration_moves.csv", newline="") as f:
     rows = list(csv.DictReader(f))
 
 def curve(target, joules):
