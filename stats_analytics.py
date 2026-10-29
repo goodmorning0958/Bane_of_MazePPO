@@ -86,3 +86,18 @@ def interactions_logistic_regression(data):
     result = model.fit()
 
     return result
+
+def bootstrap_sampling(success, iterations=10000):
+    success = np.asarray(success)
+
+    bootstrap_rates = []
+
+    for i in range(iterations):
+        bootstrap_sample = np.random.choice(success, size=len(success), replace=True)
+
+        bootstrap_rates.append(bootstrap_sample.mean())
+
+    lower_percentitle = np.percentile(bootstrap_rates, 2.5)
+    upper_percentitle = np.percentile(bootstrap_rates, 97.5)
+
+    return bootstrap_rates.mean(), lower_percentitle, upper_percentitle
