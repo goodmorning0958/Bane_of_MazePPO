@@ -456,15 +456,18 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
                     recent_outcomes.clear()
                 x = CURRICULUM_STAGES[stage]
 
-        # accuracy using A*
+        # accuracy using A* 
         ACCURACY = network.GetRobotAccuracy(np.asarray(A_star_path), np.asarray(robot_path))
         path_efficiency = min(1.0, optimal_length / max(path_length, 1e-6)) if maze_solved else 0.0   # success-weighted shortest/actual path
         energy_per_length = network.EnergyUsed / max(path_length, 1e-6)
+
         history.append(dict(success=int(maze_solved), spl=path_efficiency, energy=float(network.EnergyUsed), accuracy=float(ACCURACY),
                             energy_per_length=energy_per_length, rays=rays_this_rollout, steps=episode_length, sensing=sensing_units,
                             lidar_seconds=lidar_seconds_this_rollout, inference_seconds=inference_seconds))
+        
         buffer_episode_rewards.append(episode_reward)
         buffer_episode_steps.append(episode_length)
+
         Episode_Payload = [episode_count, episode_reward, episode_length, int(maze_solved), success_rate,
                            network.EnergyUsed, len(RegionsExplored), "completed" if done else "partial",
                            penalty_sum, path_length, total_turn_delta, lidar_seconds_this_rollout,
@@ -474,9 +477,10 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
 
         # Log data
         network.LogDataToCSV(Episode_Payload, None, None, "ep", agnt, directory, test)
-        #network.LogDataToCSV(pixel_grid, ACCURACY, None, "mze", agnt, directory, test)
-        episode_count += 1
+        #network.LogDataToCSV(pixel_grid, ACCURACY, None, "mze", agnt, directory, test)\
 
+        episode_count += 1
+        
         # Comput GAE and PPO / other opitimizations
         if done:
             next_value = torch.tensor(0.0, dtype=torch.float32)

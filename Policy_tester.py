@@ -14,6 +14,7 @@ from actor_critic import (
     RAY_SCALE,
 )
 from maze_utils import _build_bsp_tree
+from energy_lookup_table import move_joules
 
 # Flags
 ROLLOUTS = 3000
@@ -49,7 +50,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
         "EpisodeData": ["episode", "reward", "steps", "success", "success_rate", "raw_energy", "regions", "status",
                         "penalty_sum", "path_length", "turn_radians", "lidar_seconds", "inference_seconds", "rays_cast", "termination",
                         "maze_size", "difficulty_x", "stage", "optimal_length", "path_efficiency", "accuracy", "energy_per_length",
-                        "sensing_units", "max_step_cap", "revisit_steps", "elapsed_seconds"],
+                        "sensing_units", "max_step_cap", "revisit_steps", "elapsed_seconds", "physics_energy_J"],
     }
 
     for name, header in headers.items():
@@ -97,6 +98,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
         rays_this_rollout = 0
         penalty_sum = 0.0
         path_length = 0.0
+        physics_energy = 0.0
         maze_solved = False
         termination = "time_limit"
 
@@ -143,6 +145,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             revisit_steps += int(current_pixel_visits > 0)
             robot_path.append(new_pos.copy())
             path_length += float(np.linalg.norm(new_pos - robot_pos))
+            physics_energy += move_joules(turn, step_size)
             angle_diff_step = abs((new_angle - old_angle + math.pi) % (2 * math.pi) - math.pi)
             total_turn_delta += angle_diff_step # turn sharpness
 
@@ -199,7 +202,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
                            penalty_sum, path_length, total_turn_delta, lidar_seconds_this_rollout,
                            inference_seconds, rays_this_rollout, termination,
                            maze_size, episode_x, episode_stage, optimal_length, path_efficiency, ACCURACY, energy_per_length,
-                           sensing_units, network.max_step, revisit_steps, time.perf_counter() - start_time]
+                           sensing_units, network.max_step, revisit_steps, time.perf_counter() - start_time, physics_energy]
 
         # Log data
         network.LogDataToCSV(Episode_Payload, None, None, "ep", agnt, directory, test)
