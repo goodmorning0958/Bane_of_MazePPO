@@ -1,3 +1,4 @@
 .vs/
 .DS_Store
-*/__pycache__/
+__pycache__/
+training_results_v5/
