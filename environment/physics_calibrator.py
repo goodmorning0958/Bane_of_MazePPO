@@ -83,13 +83,17 @@ def move(model, data, turn, step_units):
     data, params = physics.reset(model, data)
     hold(model, data, params, SETTLE_S)
     u = data.userdata
+
     e0 = u[[17, 18, 19, 44]].copy()
     t0 = int(u[14])
+
     turned = spin(model, data, params, turn) if turn > 0 else 0.0
+    driven = drive(model, data, params, step_units * UNIT_M) if step_units > 0 else 0.0
+
     t1 = int(u[14])
     e1 = float(u[17])
-    driven = drive(model, data, params, step_units * UNIT_M) if step_units > 0 else 0.0
     e = u[[17, 18, 19, 44]] - e0
+
     return dict(target_turn=turn, target_step_units=step_units, turn_rad=turned, distance_m=driven,
                 distance_units=driven / UNIT_M, energy_J=float(e[0]), turn_energy_J=e1 - float(e0[0]),
                 drive_energy_J=float(u[17]) - e1, returned_J=float(e[1]), copper_J=float(e[2]), gearbox_J=float(e[3]),
@@ -100,28 +104,31 @@ def move(model, data, turn, step_units):
 def fit(rows, columns):
     X = np.array([[c(r) for c in columns] for r in rows], dtype=float)
     y = np.array([r["energy_J"] for r in rows], dtype=float)
+
     coef, *_ = np.linalg.lstsq(X, y, rcond=None)
     pred = X @ coef
+
     r2 = 1 - float(np.sum((y - pred) ** 2)) / float(np.sum((y - y.mean()) ** 2))
     rmse = float(np.sqrt(np.mean((y - pred) ** 2)))
-    return [float(v) for v in coef], r2, rmse
 
+    return [float(v) for v in coef], r2, rmse
 
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
+
     model = mujoco.MjModel.from_xml_path("environment/model.xml")
     data = mujoco.MjData(model)
     combos = [(t, 0.0) for t in TURNS] + [(0.0, s) for s in STEPS]
     total = len(combos) * TRIALS
+
     rows = []
     start = time.perf_counter()
+
     for trial in range(TRIALS):
         for turn, step_units in combos:
             r = move(model, data, turn, step_units)
             r["trial"] = trial
             rows.append(r)
-            print(f"{len(rows)}/{total}  turn {turn:.2f} rad  step {step_units:.2f}  ->  turned {r['turn_rad']:.2f}  "
-                  f"moved {r['distance_units']:.2f}  energy {r['energy_J']:.3f} J  ({time.perf_counter() - start:.0f}s)")
 
     with open(OUT / "calibration_moves.csv", "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
@@ -133,9 +140,11 @@ if __name__ == "__main__":
     one = lambda r: 1.0
     d_on = lambda r: 1.0 if r["target_step_units"] > 0 else 0.0
     a_on = lambda r: 1.0 if r["target_turn"] > 0 else 0.0
+
     (A1, B1), r2_1, e_1 = fit(rows, [d, a])
     (A2, B2, C2), r2_2, e_2 = fit(rows, [d, a, one])
     (A3, B3, CD3, CT3), r2_3, e_3 = fit(rows, [d, a, d_on, a_on])
+
     summary = {
         "unit_m": UNIT_M, "pwm": PWM, "trials": TRIALS, "moves": len(rows), "seed": SEED,
         "model_1": {"formula": "E = a*distance + b*turn", "a_J_per_unit": A1, "b_J_per_rad": B1,
@@ -147,8 +156,5 @@ if __name__ == "__main__":
         "current_rule": {"ENERGY_PER_RADIAN": 0.5},
         "minutes": (time.perf_counter() - start) / 60,
     }
+    
     (OUT / "calibration_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    print()
-    print(json.dumps(summary, indent=2))
-    print()
-    print(f"physics says 1 rad of turning costs the same as {B1 / A1:.2f} units of driving (current code uses 0.5)")
