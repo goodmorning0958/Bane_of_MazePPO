@@ -1,10 +1,12 @@
-from stats.stats_analytics import logistic_regression, interactions_logistic_regression
+from stats_analytics import logistic_regression, interactions_logistic_regression
 import statsmodels.api as sm
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import glob
+import os
 
-data = pd.read_csv('metadata.csv')
+data = pd.read_csv('runs/sweep_81_v5/manifest.csv')
 
 required_columns = ['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn', 'final_success_binary']
 assert all(col in data.columns for col in required_columns)
@@ -56,3 +58,56 @@ for column, readable_name in converting_to_read:
 
     plt.show()
     plt.close()
+
+files = glob.glob('runs/sweep_81_v5/*/EpisodeData_seep_*.csv')
+
+all_data = []
+
+for file in files:
+    dataa = pd.read_csv(file)
+
+    agent_id = os.path.basename(file).replace('csv', '')
+    dataa['agent_id'] = agent_id
+
+    all_data.append(dataa)
+
+training_data = pd.concat(all_data, ignore_index=True)
+
+training_data['episode_group'] = ((training_data['episode'] - 1) // 1000) * 1000
+
+average_success_stuff = training_data.groupby('episode_group')['success'].mean().reset_index()
+average_success_stuff['success'] *= 100
+
+plt.figure(figsize=(8, 5))
+plt.plot(average_success_stuff['episode_group'], average_success_stuff['success'])
+plt.title("Success Rate vs. Amount of Training Episodes Completed")
+plt.xlabel("Trainging Episodes Completed")
+plt.ylabel("Success Rate")
+plt.ylim(-5, 105)
+plt.grid(True, alpha=0.4)
+plt.tight_layout()
+
+filename = "success_rate_vs_training_episodes"
+plt.savefig(filename, dpi=300)
+
+plt.show()
+plt.close()
+
+training_data['accuracy_group'] = training_data['accuracy'] // 1
+accuracy_stuff = training_data.groupby('accuracy_group')['success'].mean().reset_index()
+accuracy_stuff['success'] *= 100
+
+plt.figure(figsize=(8,5))
+plt.plot(accuracy_stuff['accuracy'], accuracy_stuff['success'])
+plt.title("Success Rate vs. Accuracy Compared to A* Path")
+plt.xlabel("Accuracy")
+plt.ylabel("Success Rate")
+plt.ylim(-5, 105)
+plt.grid(True, alpha=0.4)
+plt.tight_layout()
+
+filename = "success_rate_vs_accuracy"
+plt.savefig(filename, dpi=300)
+
+plt.show()
+plt.close()
