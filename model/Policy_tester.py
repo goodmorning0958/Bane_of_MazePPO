@@ -207,6 +207,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
         # Log data
         network.LogDataToCSV(Episode_Payload, None, None, "ep", agnt, directory, test)
         #network.LogDataToCSV(pixel_grid, ACCURACY, None, "mze", agnt, directory, test)
+        
         episode_count += 1
 
     return network
