@@ -1,9 +1,9 @@
 # FOR THE FINAL TRAINING LOOP
 
-from model.agent_ppo import StartAgent
-import model.actor_critic as actor_critic
-import model.agent_ppo as agent_ppo
-import environment.PPO_action_converter as PPO_action_converter
+from agent_ppo import StartAgent
+import actor_critic
+import agent_ppo
+import PPO_action_converter
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 import csv
@@ -18,15 +18,15 @@ import torch
 
 EPISODES = 100000
 SEEDS = [42]
-MACHINE = 1        
-JOBS_BY_MACHINE = {1: range(0, 20), 2: range(20, 40), 3: range(40, 81)}   
-MAX_WORKERS_BY_MACHINE = {1: 7, 2: 7, 3: 15}   
+MACHINE = 3        
+JOBS_BY_MACHINE = {1: range(0, 20), 2: range(20, 40), 3: range(40, 81)}  
+MAX_WORKERS_BY_MACHINE = {1: 7, 2: 7, 3: 15} 
 MAX_WORKERS = MAX_WORKERS_BY_MACHINE[MACHINE]
 AGENTS = None
 JOBS = [i for i in JOBS_BY_MACHINE[MACHINE] if AGENTS is None or i in AGENTS]
 OUT = Path("runs") / "sweep_81_v5"
 STOP_AT = None  
-STOP_FILE = OUT / "STOP"   
+STOP_FILE = OUT / "STOP"  
 
 DEFAULTS = dict(NNh1=48, NNh2=24, VARNumberOfRayCasts=24, VARAllowedEnergy=150, VARWeightInitType="orth",
                 VARtargetMaxTurn=0.5, VARFOV=360, VARRayDistance=None)
@@ -37,7 +37,7 @@ GRID = {
     "VARAllowedEnergy": [150, 60, 30],
     "VARtargetMaxTurn": [3.14159, 1.0, 0.5],
 }
-CONSTANTS = {"MAX_STEP_START": 1.5, "MAX_STEP_END": 1.5}   
+CONSTANTS = {"MAX_STEP_START": 1.5, "MAX_STEP_END": 1.5}  
 
 def stop_timestamp():
     if STOP_AT is None:
