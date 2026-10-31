@@ -68,6 +68,7 @@ SUMMARY_SUCCESS_WINDOW = 100
 def _compute_gae(rewards, values, dones, next_value, gamma=0.99, lam=0.95): 
     advantages = torch.zeros_like(rewards)
     next_advantage = torch.zeros((), dtype=values.dtype)
+
     for t in reversed(range(len(rewards))):
         next_value_t = next_value if t == len(rewards) - 1 else values[t + 1]
         done = 1.0 - dones[t]
@@ -80,6 +81,7 @@ def _compute_gae(rewards, values, dones, next_value, gamma=0.99, lam=0.95):
 def _ppo_update(network, optimizer, ppo_parameters, states, actions, log_probs, returns, advantages):
     advantages = advantages.detach().clone()
     returns, log_probs = returns.detach(), log_probs.detach()
+
     if len(advantages) > 1:
         std = advantages.std(unbiased=False)
         if std > 1e-8:
@@ -112,7 +114,7 @@ def _ppo_update(network, optimizer, ppo_parameters, states, actions, log_probs, 
             surrogate_1 = probability_ratio * advantages[batch]
             surrogate_2 = torch.clamp(probability_ratio, 0.8, 1.2) * advantages[batch]
 
-            # Loss
+            # Losses
             actor_loss = -torch.min(surrogate_1, surrogate_2).mean()
             critic_loss = F.smooth_l1_loss(batch_value, returns[batch])
             entropy_mean = entropy.mean()
@@ -150,37 +152,40 @@ def _write_summary(path, history, config, start_time):
         values = [v for v in values if v is not None and math.isfinite(v)]
         return float(np.mean(values)) if values else None
 
-    wins = [h for h in history if h["success"]]
+    sucesses = [h for h in history if h["success"]]
     last = history[-SUMMARY_SUCCESS_WINDOW:]
-    last_wins = [h for h in last if h["success"]]
-    win_energy = sorted(h["energy"] for h in wins)
+    last_sucesses = [h for h in last if h["success"]]
+    sucess_energy = sorted(h["energy"] for h in sucesses)
 
     summary = dict(
-        episodes=len(history), wall_seconds=time.perf_counter() - start_time,
-        last_window_success_rate=mean([h["success"] for h in last]),
-        last_window_path_efficiency=mean([h["spl"] for h in last]),
-        last_window_accuracy=mean([h["accuracy"] for h in last_wins]),
-        last_window_energy_per_success=mean([h["energy"] for h in last_wins]),
-        last_window_energy_per_length=mean([h["energy_per_length"] for h in last_wins]),
-        last_window_rays_per_episode=mean([h["rays"] for h in last]),
-        last_window_steps_per_episode=mean([h["steps"] for h in last]),
-        total_energy=sum(h["energy"] for h in history), total_rays=sum(h["rays"] for h in history),
-        total_sensing_units=sum(h["sensing"] for h in history),
-        total_lidar_seconds=sum(h["lidar_seconds"] for h in history),
-        total_inference_seconds=sum(h["inference_seconds"] for h in history),
-        successes=len(wins),
-        success_energy_median=float(np.median(win_energy)) if win_energy else None,
-        success_energy_p90=float(np.percentile(win_energy, 90)) if win_energy else None,
-        suggested_energy_budget=round(2.0 * float(np.median(win_energy)), 1) if len(win_energy) >= 5 else None,
-        param_count=config["param_count"], actor_param_count=config["actor_param_count"],
-        actor_macs_per_inference=config["actor_macs_per_inference"],
+        episodes = len(history), wall_seconds=time.perf_counter() - start_time,
+        last_window_success_rate = mean([h["success"] for h in last]),
+        last_window_path_efficiency = mean([h["spl"] for h in last]),
+        last_window_accuracy = mean([h["accuracy"] for h in last_sucesses]),
+        last_window_energy_per_success = mean([h["energy"] for h in last_sucesses]),
+        last_window_energy_per_length = mean([h["energy_per_length"] for h in last_sucesses]),
+        last_window_rays_per_episode = mean([h["rays"] for h in last]),
+        last_window_steps_per_episode = mean([h["steps"] for h in last]),
+        total_energy = sum(h["energy"] for h in history), total_rays=sum(h["rays"] for h in history),
+        total_sensing_units = sum(h["sensing"] for h in history),
+        total_lidar_seconds = sum(h["lidar_seconds"] for h in history),
+        total_inference_seconds = sum(h["inference_seconds"] for h in history),
+        successes = sucesses,
+        success_energy_median = float(np.median(sucess_energy)) if sucess_energy else None,
+        success_energy_p90 = float(np.percentile(sucess_energy, 90)) if sucess_energy else None,
+        suggested_energy_budget = round(2.0 * float(np.median(sucess_energy)), 1) if len(sucess_energy) >= 5 else None,
+        param_count = config["param_count"], actor_param_count=config["actor_param_count"],
+        actor_macs_per_inference = config["actor_macs_per_inference"],
     )
+
     path.write_text(json.dumps(summary, indent=2), encoding="utf-8")    
 
 def _trim_csv(path, column, keep):
     with open(path, newline="", encoding="utf-8") as f:
         rows = list(csv.reader(f))
+
     rows = rows[:1] + [r for r in rows[1:] if keep(float(r[column]))]
+
     with open(path, "w", newline="", encoding="utf-8") as f:
         csv.writer(f).writerows(rows)
 
@@ -194,6 +199,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
     directory = Path(output_dir) if output_dir is not None else Path("runs") / f"agent_{agnt}_seed_{seed}_{time.time_ns()}"
     directory.mkdir(parents=True, exist_ok=True)
     config_path = directory / f"RunConfig_{agnt}.json"
+
     x = CURRICULUM_STAGES[0]
     success_rate = 0.0
     episode_count = 0
@@ -218,34 +224,35 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
     w_optimizer = torch.optim.Adam([network.log_w_turn], lr=1e-3) if ADAPT_TURN_WEIGHT else None
 
     # added config for params
-    config = dict(seed=seed, rollouts=rollouts, h1=NNh1, h2=NNh2, inputs=NNinputs,
-                  rays=VARNumberOfRayCasts, fov_radians=network.FOV, ray_distance=VARRayDistance,
-                  energy_budget=VARAllowedEnergy, energy_scale=VARAllowedEnergy / network.MaxSteps,
-                  energy_weight=ENERGY_REWARD_WEIGHT, turn_weight=TURN_REWARD_WEIGHT,
-                  time_weight=TIME_REWARD_WEIGHT, adaptive_turn=ADAPT_TURN_WEIGHT,
-                  target_max_turn=VARtargetMaxTurn, curriculum=CURRICULUM_ENABLED,
-                  initial_difficulty=x, k=network.k.item(), sd=network.sd.item(),
-                  ray_offset=network.RayOffset.item(), weight_init=VARWeightInitType,
-                  max_steps=network.MaxSteps, min_rollout_steps=MIN_ROLLOUT_STEPS,
-                  max_step_start=MAX_STEP_START, max_step_end=MAX_STEP_END, step_ramp_success=STEP_RAMP_SUCCESS,
-                  min_rollout_steps_learning=MIN_ROLLOUT_STEPS_LEARNING, curriculum_window=CURRICULUM_WINDOW,
-                  curriculum_promote=CURRICULUM_PROMOTE, curriculum_demote=CURRICULUM_DEMOTE,
-                  curriculum_stages=CURRICULUM_STAGES, stall_window=STALL_WINDOW,
-                  stall_min_displacement=STALL_MIN_DISPLACEMENT, stall_end_penalty=STALL_END_PENALTY,
-                  reward_clip=REWARD_CLIP, step_time_cost=STEP_TIME_COST, clearance_weight=CLEARANCE_WEIGHT,
-                  clearance_distance=CLEARANCE_DISTANCE, visit_penalty=VISIT_PENALTY, visit_cap=VISIT_CAP,
-                  explore_bonus=EXPLORE_BONUS, stall_step_size=STALL_STEP_SIZE, stall_step_penalty=STALL_STEP_PENALTY,
-                  over_budget_penalty=OVER_BUDGET_PENALTY,
-                  reward_scale=REWARD_SCALE, hard_energy_limit=HARD_ENERGY_LIMIT, log_std_min=LOG_STD_MIN, ray_scale=RAY_SCALE,
-                  param_count=sum(p.numel() for p in network.parameters()),
-                  actor_param_count=sum(p.numel() for m in (network.act1, network.act2, network.out) for p in m.parameters()),
-                  actor_macs_per_inference=int(network.inputs * NNh1 + NNh1 * NNh2 + NNh2 * 2),
-                  ppo_epochs=PPO_EPOCHS, minibatch_size=MINIBATCH_SIZE, target_kl=TARGET_KL,
-                  learning_rate=LEARNING_RATE, entropy_coef=ENTROPY_COEF,
-                  dead_end_terminal=DEAD_END_IS_TERMINAL, torch_version=torch.__version__,
-                  numpy_version=np.__version__, python_version=sys.version)
+    config = dict(seed = seed, rollouts = rollouts, h1 = NNh1, h2 = NNh2, inputs = NNinputs,
+                  rays = VARNumberOfRayCasts, fov_radians = network.FOV, ray_distance = VARRayDistance,
+                  energy_budget = VARAllowedEnergy, energy_scale = VARAllowedEnergy / network.MaxSteps,
+                  energy_weight = ENERGY_REWARD_WEIGHT, turn_weight = TURN_REWARD_WEIGHT,
+                  time_weight = TIME_REWARD_WEIGHT, adaptive_turn = ADAPT_TURN_WEIGHT,
+                  target_max_turn = VARtargetMaxTurn, curriculum = CURRICULUM_ENABLED,
+                  initial_difficulty = x, k = network.k.item(), sd = network.sd.item(),
+                  ray_offset = network.RayOffset.item(), weight_init = VARWeightInitType,
+                  max_steps = network.MaxSteps, min_rollout_steps = MIN_ROLLOUT_STEPS,
+                  max_step_start = MAX_STEP_START, max_step_end = MAX_STEP_END, step_ramp_success = STEP_RAMP_SUCCESS,
+                  min_rollout_steps_learning = MIN_ROLLOUT_STEPS_LEARNING, curriculum_window = CURRICULUM_WINDOW,
+                  curriculum_promote = CURRICULUM_PROMOTE, curriculum_demote = CURRICULUM_DEMOTE,
+                  curriculum_stages = CURRICULUM_STAGES, stall_window = STALL_WINDOW,
+                  stall_min_displacement = STALL_MIN_DISPLACEMENT, stall_end_penalty = STALL_END_PENALTY,
+                  reward_clip = REWARD_CLIP, step_time_cost = STEP_TIME_COST, clearance_weight = CLEARANCE_WEIGHT,
+                  clearance_distance = CLEARANCE_DISTANCE, visit_penalty = VISIT_PENALTY, visit_cap = VISIT_CAP,
+                  explore_bonus = EXPLORE_BONUS, stall_step_size = STALL_STEP_SIZE, stall_step_penalty = STALL_STEP_PENALTY,
+                  over_budget_penalty = OVER_BUDGET_PENALTY,
+                  reward_scale = REWARD_SCALE, hard_energy_limit = HARD_ENERGY_LIMIT, log_std_min = LOG_STD_MIN, ray_scale = RAY_SCALE,
+                  param_count = sum(p.numel() for p in network.parameters()),
+                  actor_param_count = sum(p.numel() for m in (network.act1, network.act2, network.out) for p in m.parameters()),
+                  actor_macs_per_inference = int(network.inputs * NNh1 + NNh1 * NNh2 + NNh2 * 2),
+                  ppo_epochs = PPO_EPOCHS, minibatch_size = MINIBATCH_SIZE, target_kl = TARGET_KL,
+                  learning_rate = LEARNING_RATE, entropy_coef = ENTROPY_COEF,
+                  dead_end_terminal = DEAD_END_IS_TERMINAL, torch_version = torch.__version__,
+                  numpy_version = np.__version__, python_version = sys.version)
     
     config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+
     headers = {
         "EpisodeData": ["episode", "reward", "steps", "success", "success_rate", "raw_energy", "regions", "status",
                         "penalty_sum", "path_length", "turn_radians", "lidar_seconds", "inference_seconds", "rays_cast", "termination",
@@ -260,22 +267,30 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
 
     checkpoint_path = directory / "checkpoint.pt"
     resumed = checkpoint_path.exists()
+
     if resumed:
         ck = torch.load(checkpoint_path, weights_only=False)
         network.load_state_dict(ck["model"])
         optimizer.load_state_dict(ck["optimizer"])
+
         if w_optimizer is not None:
             w_optimizer.load_state_dict(ck["w_optimizer"])
+
         x, stage, ramp_rate, energy_ramp_rate = ck["x"], ck["stage"], ck["ramp_rate"], ck["energy_ramp_rate"]
         past, not_past, success_rate, episode_count = ck["past"], ck["not_past"], ck["success_rate"], ck["episode_count"]
+
         recent_outcomes.extend(ck["recent_outcomes"])
         stage_outcomes.extend(ck["stage_outcomes"])
+
         history = ck["history"]
+
         start_time = time.perf_counter() - ck["elapsed"]
+
         random.setstate(ck["python_rng"])
         np.random.set_state(ck["numpy_rng"])
         torch.set_rng_state(ck["torch_rng"])
         network.set_max_step(ramp_rate)
+
         _trim_csv(directory / f"EpisodeData_{test}{agnt}.csv", 0, lambda v: v < episode_count)
         _trim_csv(directory / f"TrainingData_{test}{agnt}.csv", 0, lambda v: v <= episode_count)
         _trim_csv(directory / f"UpdateData_{test}{agnt}.csv", 0, lambda v: v <= episode_count)
@@ -291,6 +306,8 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
     buffered_advantages, buffered_returns = [], []
     buffer_turn_total = 0.0
     buffer_episode_rewards, buffer_episode_steps = [], []
+
+    # loop
     for _rollout in range(episode_count, rollouts):
         
         # get training example
@@ -514,15 +531,19 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
                                     float(np.mean([row[3] for row in diagnostics])) if diagnostics else None,
                                     float(network.log_std[0]), float(network.log_std[1]), rolling_success, ramp_rate,
                                     network.max_step, stage, rollout_target])
-        # Update weights adam
+            
         if w_optimizer is not None:
             avg_turn = buffer_turn_total / buffered_steps
+
+            # update weights
             w_turn_loss = -network.w_turn * (avg_turn - network.target_max_turn)
             w_optimizer.zero_grad()
             w_turn_loss.backward()
             w_optimizer.step()
+
             with torch.no_grad():
                 network.log_w_turn.clamp_(math.log(1e-4), math.log(10.0))
+
         network.clear_memory(capacity) 
         network.set_max_step(ramp_rate) 
         buffered_steps = 0

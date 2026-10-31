@@ -5,7 +5,6 @@ from environment.SImulated_BSP_LiDAR import Tree
 # BSP tree
 raycaster_env = Tree()
 
-
 def _fov_to_radians(value):
     if value is None:
         return math.pi / 2

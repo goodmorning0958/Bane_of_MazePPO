@@ -12,8 +12,8 @@ import torch.distributions as dist
 from fastdtw import fastdtw
 from scipy.spatial.distance import euclidean
 
-from environment.PPO_action_converter import ConvertRobotAction
 from environment.maze_utils import raycaster_env, _fov_to_radians
+from environment.energy_lookup_table import move_joules
 
 ADAPT_TURN_WEIGHT = False
 DEAD_END_IS_TERMINAL = True
@@ -224,7 +224,7 @@ class ActorCritic(nn.Module):
     @torch.no_grad()
     def EnergyCost(self, angle, step_size, new_angle, done, c1, c2, c3, VARRayDistance, maze_size):
         turn = (new_angle - angle + math.pi) % (2 * math.pi) - math.pi
-        energy_value = ConvertRobotAction([turn, step_size])
+        energy_value = move_joules(turn, step_size)
         energy_value = float(energy_value)
         raw_energy = max(0.0, energy_value)
         angle_diff = abs((new_angle - angle + math.pi) % (2 * math.pi) - math.pi)
@@ -233,9 +233,6 @@ class ActorCritic(nn.Module):
         max_distance = float(maze_size if VARRayDistance is None else VARRayDistance)
         compute_time = float(0.002 * self.last_rays_cast * (max_distance / 10) ** 1)
         self.last_raw_energy = raw_energy
-
-        # normalised by the maze size, like the progress reward, so the energy penalty is a fixed fraction of what a
-        # straight step toward the goal earns (and does not change when the energy budget is changed)
 
         self.last_energy_component = float(c1 * raw_energy / maze_size)
         self.last_turn_component = float(c2 * turn_cost)
