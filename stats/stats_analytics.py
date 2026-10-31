@@ -5,7 +5,7 @@ import statsmodels.api as sm
 import pandas as pd
 
 def precision_analysis(p, e):
-    n = np.ciel((1.96**2*p*(1-p))/e**2)
+    n = np.ceil((1.96**2*p*(1-p))/e**2)
     return n
 
 def latin_hypercube_sampling(samples):
@@ -34,11 +34,13 @@ def logistic_regression(data):
 
     return result
 
-def extra_stats(result, data):
-    odds_ratios = np.exp(result.params)
+def extra_stats(result):
+    variable_and_increments = {'VARNumberOfRayCasts': 8, 'VARFOV': 90, 'VARAllowedEnergy': 30, 'VARtargetMaxTurn': 0.5}
 
     print("\nOdds Ratios:")
-    print(odds_ratios) #idk why i kept this it just gives the odds ratios, it used to have more stuff but i deleted it because it was done in oter functions
+    for variable, increment in variable_and_increments.items():
+        odds_ratio = np.exp(result.params[variable]*increment)
+        print(f"\n{variable}: {odds_ratio:.5f} (per {increment} increase in {variable})")
 
 def roc_auc(result, data):
     X = data[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn']]
@@ -56,6 +58,12 @@ def roc_auc(result, data):
 
 def roc_auc_for_interactions(result, data):
     X = data[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn', 'ray_count_fov', 'energy_constraint_turn_sharpness', 'ray_count_energy_constraint', 'fov_turn_sharpness', 'ray_count_turn_sharpness', 'fov_energy_constraint']]
+
+    X['VARNumberOfRayCasts'] -= X['VARNumberOfRayCasts'].mean()
+    X['VARFOV'] -= X['VARFOV'].mean()
+    X['VARAllowedEnergy'] -= X['VARAllowedEnergy'].mean()
+    X['VARtargetMaxTurn'] -= X['VARtargetMaxTurn'].mean()
+
     X = sm.add_constant(X)
 
     y = data['final_success_binary']
@@ -109,7 +117,9 @@ def bootstrap_success_rate(success, iterations=10000):
 
 def bootstrap_odds_ratios(data, iterations=10000):
     variables = ['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn']
+    variable_and_increments = {'VARNumberOfRayCasts': 8, 'VARFOV': 90, 'VARAllowedEnergy': 30, 'VARtargetMaxTurn': 0.5}
     bootstrap_ratios = []
+    successful_models = 0
 
     for i in range(iterations):
         bootstrap_sample = np.random.choice(len(data), size=len(data), replace=True)
@@ -122,10 +132,21 @@ def bootstrap_odds_ratios(data, iterations=10000):
             model = sm.Logit(y, X)
             result = model.fit(disp=0)
 
-            odds_ratios = np.exp(result.params[variables])
+            odds_ratios = {}
+            for variable, increment in variable_and_increments.items():
+                odds_ratio = np.exp(result.params[variable]*increment)
+                odds_ratios[variable] = odds_ratio
+
             bootstrap_ratios.append(odds_ratios)
+
+            successful_models += 1
         except Exception:
             continue
+
+    if successful_models == 0:
+        raise ValueError("No models suceeded")
+
+    print(f"Successful Models: {successful_models}/{iterations}")
 
     bootstrap_ratios = np.asarray(bootstrap_ratios)
 

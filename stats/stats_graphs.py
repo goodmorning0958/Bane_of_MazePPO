@@ -24,7 +24,7 @@ for column, readable_name in converting_to_read:
     plt.title(f"Success Rate vs. {readable_name}")
     plt.ylim(-5, 105)
     plt.grid(True, alpha=0.4)
-    plt.tight_layout
+    plt.tight_layout()
 
     filename = f"success_rate_vs_{column}.png"
     plt.savefig(filename, dpi=300)
@@ -87,7 +87,7 @@ plt.ylim(-5, 105)
 plt.grid(True, alpha=0.4)
 plt.tight_layout()
 
-filename = "success_rate_vs_training_episodes"
+filename = "success_rate_vs_training_episodes.png"
 plt.savefig(filename, dpi=300)
 
 plt.show()
@@ -106,7 +106,25 @@ plt.ylim(-5, 105)
 plt.grid(True, alpha=0.4)
 plt.tight_layout()
 
-filename = "success_rate_vs_accuracy"
+filename = "success_rate_vs_accuracy.png"
+plt.savefig(filename, dpi=300)
+
+plt.show()
+plt.close()
+
+training_data['difficulty_group'] = (training_data['difficulty_x'] // 5) * 5
+accuracy_for_difficulty = training_data.groupby('difficulty_group')['accuracy'].mean().reset_index()
+
+plt.figure(figsize=(8,5))
+plt.plot(accuracy_for_difficulty['difficulty_group'], accuracy_for_difficulty['accuracy'])
+plt.title("Accuracy Compared to A* Path vs. Maze Difficulty")
+plt.xlabel("Difficulty")
+plt.ylabel("Accuracy")
+plt.ylim(-5, 105)
+plt.grid(True, alpha=0.4)
+plt.tight_layout()
+
+filename = "accuracy_vs_maze_difficulty.png"
 plt.savefig(filename, dpi=300)
 
 plt.show()
