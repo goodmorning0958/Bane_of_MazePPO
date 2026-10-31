@@ -224,7 +224,7 @@ class ActorCritic(nn.Module):
     @torch.no_grad()
     def EnergyCost(self, angle, step_size, new_angle, done, c1, c2, c3, VARRayDistance, maze_size):
         turn = (new_angle - angle + math.pi) % (2 * math.pi) - math.pi
-        _, energy_value = ConvertRobotAction([turn, step_size], done)
+        energy_value = ConvertRobotAction([turn, step_size])
         energy_value = float(energy_value)
         raw_energy = max(0.0, energy_value)
         angle_diff = abs((new_angle - angle + math.pi) % (2 * math.pi) - math.pi)
