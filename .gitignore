@@ -1,4 +1,7 @@
 .vs/
 .DS_Store
 __pycache__/
-training_results_v5/
+training_results_v5/*/*
+!training_results_v5/*/Policy_*.pt
+!training_results_v5/*/Summary_*.json
+!training_results_v5/*/RunConfig_*.json
