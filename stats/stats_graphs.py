@@ -129,3 +129,20 @@ plt.savefig(filename, dpi=300)
 
 plt.show()
 plt.close()
+
+difficulty_for_success = training_data.groupby('difficulty_group')['success'].mean().reset_index()
+
+plt.figure(figsize=(8,5))
+plt.plot(difficulty_for_success['difficulty'], difficulty_for_success['success'])
+plt.title("Success Rate vs. Maze Difficulty")
+plt.xlabel("Difficulty")
+plt.ylabel("Success Rate")
+plt.ylim(-5, 105)
+plt.grid(True, alpha=0.4)
+plt.tight_layout()
+
+filename = "success_rate_vs_maze_difficulty.png"
+plt.savefig(filename, dpi=300)
+
+plt.show()
+plt.close()

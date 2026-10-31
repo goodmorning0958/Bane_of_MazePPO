@@ -30,7 +30,7 @@ def logistic_regression(data):
     y = data['final_success_binary']
 
     model = sm.Logit(y, X)
-    result = model.fit()
+    result = model.fit(disp=0)
 
     return result
 
@@ -95,7 +95,7 @@ def interactions_logistic_regression(data):
     y = data['final_success_binary']
 
     model = sm.Logit(y, X)
-    result = model.fit()
+    result = model.fit(disp=0)
 
     return result
 
