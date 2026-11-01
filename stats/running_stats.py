@@ -1,20 +1,42 @@
-from stats.stats_analytics import logistic_regression, interactions_logistic_regression, extra_stats, roc_auc, bootstrap_sampling
+from stats_analytics import logistic_regression, interactions_logistic_regression, extra_stats, roc_auc, bootstrap_success_rate, roc_auc_for_interactions, bootstrap_odds_ratios
 import pandas as pd
+import glob
+import os
 
-data = pd.read_csv('metadataabit.csv')
+files = glob.glob('policy_eval_results/*/EpisodeData_eval_sweep_*.csv')
+
+all_data = []
+
+for file in files:
+    dataa = pd.read_csv(file)
+
+    agent_id = os.path.basename(file).replace('csv', '')
+    dataa['agend_id'] = agent_id
+
+    all_data.append(dataa)
+
+dataaa = pd.concat(all_data, ignore_index=True)
+
+conditions = pd.read_csv('training_results/manifest.csv')
+
+data = pd.merge(conditions, on='agent_id', how='left')
 
 result = logistic_regression(data)
+odds_ratios_confidence_intervals = bootstrap_odds_ratios(data)
 print("Regular Logistic Regression Results:")
 print(result.summary())
 print("\nRegular Logistic Regression AIC:", result.aic)
+roc_auc(result, data)
+extra_stats(result, data)
+for variable, interval in odds_ratios_confidence_intervals.items():
+    print(f"\n{variable} Bootstrap 95% Confidence Interval: ({interval['lower_percentitle']:.3f}, {interval['upper_percentitle']:.3f})")
 
-overall_success_rate, lower_percentile, upper_percentile = bootstrap_sampling(data['final_success_binary'])
+overall_success_rate, lower_percentile, upper_percentile = bootstrap_success_rate(data['final_success_binary'])
 print(f"\nOverall Success Rate: {overall_success_rate:.3%}")
 print(f"\n95% Bootstrap Confidence Interval: ({lower_percentile:.3%}, {upper_percentile:.3%})")
-
-roc_auc(result, data)
 
 interactions_result = interactions_logistic_regression(data)
 print("\nLogistic Regression with Interactions Results:")
 print(interactions_result.summary())
 print("\nInteractions Logistic Regression AIC:", interactions_result.aic)
+roc_auc_for_interactions(interactions_result, data)

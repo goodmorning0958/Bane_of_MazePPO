@@ -24,7 +24,7 @@ def latin_hypercube_sampling(samples):
     return lhs_configurations
 
 def logistic_regression(data):
-    X = data[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn']]
+    X = data[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn']].copy()
     X = sm.add_constant(X)
 
     y = data['final_success_binary']
