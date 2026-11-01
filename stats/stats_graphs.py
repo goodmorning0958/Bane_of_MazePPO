@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import glob
 import os
 
-fileseval = glob.glob('policy_eval_results/*/EpisodeData_eval_sweep_*.csv')
+fileseval = glob.glob('policy_eval_results/agent_*/EpisodeData_eval_sweep_*.csv')
 
 all_dataa = []
 

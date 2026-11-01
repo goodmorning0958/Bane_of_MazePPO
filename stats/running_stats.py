@@ -3,7 +3,7 @@ import glob
 import os
 import pandas as pd
 
-files = glob.glob('policy_eval_results/*/EpisodeData_eval_sweep_*.csv')
+files = glob.glob('policy_eval_results/agent_*/EpisodeData_eval_sweep_*.csv')
 
 all_data = []
 
