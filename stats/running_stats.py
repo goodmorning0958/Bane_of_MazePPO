@@ -1,3 +1,5 @@
+import re
+
 from stats_analytics import logistic_regression, interactions_logistic_regression, extra_stats, roc_auc, bootstrap_success_rate, roc_auc_for_interactions, bootstrap_odds_ratios, linear_regression
 import glob
 import os
@@ -24,6 +26,10 @@ data = pd.merge(dataaa, conditions, on='agent_id', how='left')
 result = logistic_regression(data)
 result_linear = linear_regression(data, 'physics_energy_J')
 result_linear_exploration = linear_regression(data, 'path_efficiency')
+result_linear = linear_regression(data, 'success')
+result_linear_energy = linear_regression(data, 'physics_energy_J')
+result_linear_exploration = linear_regression(data, 'path_efficiency')
+
 odds_ratios_confidence_intervals = bootstrap_odds_ratios(data)
 
 print("Regular Logistic Regression Results:")
@@ -38,6 +44,14 @@ for variable, interval in odds_ratios_confidence_intervals.items():
 print("Linear regression results:")
 print(result_linear.summary())
 print(result_linear_exploration.summary())
+print(result_linear_energy.summary())
+print(result_linear_exploration.summary())
+
+roc_auc(result, data)
+extra_stats(result, data)
+
+for variable, interval in odds_ratios_confidence_intervals.items():
+    print(f"\n{variable} Bootstrap 95% Confidence Interval: ({interval['lower_percentitle']:.3f}, {interval['upper_percentitle']:.3f})")
 
 overall_success_rate, lower_percentile, upper_percentile = bootstrap_success_rate(data)
 print(f"\nOverall Success Rate: {overall_success_rate:.3%}")
