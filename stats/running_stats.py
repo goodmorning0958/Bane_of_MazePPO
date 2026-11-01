@@ -3,7 +3,7 @@ import glob
 import os
 import pandas as pd
 
-files = glob.glob('policy_eval_results/*/EpisodeData_eval_sweep_*.csv')
+files = glob.glob('policy_eval_results/agent_*/EpisodeData_eval_sweep_*.csv')
 
 all_data = []
 
@@ -11,18 +11,19 @@ for file in files:
     dataa = pd.read_csv(file)
 
     agent_id = os.path.basename(file).replace('EpisodeData_eval_sweep_', '').replace('.csv', '')
-    dataa['agent_id'] = agent_id
+    dataa['agent_id'] = int(agent_id)
 
     all_data.append(dataa)
 
 dataaa = pd.concat(all_data, ignore_index=True)
 
-conditions = pd.read_csv('training_results/manifest.csv')
+conditions = pd.read_csv('training_results/manifest.csv').rename(columns = {'index': 'agent_id'})
 
 data = pd.merge(dataaa, conditions, on='agent_id', how='left')
 
 result = logistic_regression(data)
-result_linear = linear_regression(data)
+result_linear = linear_regression(data, 'physics_energy_J')
+result_linear_exploration = linear_regression(data, 'path_efficiency')
 odds_ratios_confidence_intervals = bootstrap_odds_ratios(data)
 
 print("Regular Logistic Regression Results:")
@@ -30,18 +31,13 @@ print(result.summary())
 print("\nRegular Logistic Regression AIC:", result.aic)
 
 roc_auc(result, data)
-extra_stats(result, data)
+extra_stats(result)
 for variable, interval in odds_ratios_confidence_intervals.items():
     print(f"\n{variable} Bootstrap 95% Confidence Interval: ({interval['lower_percentitle']:.3f}, {interval['upper_percentitle']:.3f})")
 
 print("Linear regression results:")
 print(result_linear.summary())
-
-roc_auc(result, data)
-extra_stats(result, data)
-
-for variable, interval in odds_ratios_confidence_intervals.items():
-    print(f"\n{variable} Bootstrap 95% Confidence Interval: ({interval['lower_percentitle']:.3f}, {interval['upper_percentitle']:.3f})")
+print(result_linear_exploration.summary())
 
 overall_success_rate, lower_percentile, upper_percentile = bootstrap_success_rate(data)
 print(f"\nOverall Success Rate: {overall_success_rate:.3%}")

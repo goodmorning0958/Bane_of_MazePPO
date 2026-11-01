@@ -35,7 +35,7 @@ def logistic_regression(data):
     return result
 
 def linear_regression(data, dtype):
-    mask = data['final_success_binary'] == 1
+    mask = data['success'] == 1
     successful = data[mask]
 
     X = successful[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn']]
@@ -70,12 +70,19 @@ def roc_auc(result, data):
     return fpr, tpr, thresholds, auc
 
 def roc_auc_for_interactions(result, data):
-    X = data[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn', 'ray_count_fov', 'energy_constraint_turn_sharpness', 'ray_count_energy_constraint', 'fov_turn_sharpness', 'ray_count_turn_sharpness', 'fov_energy_constraint']].copy()
+    X = data[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn']].copy()
 
     X['VARNumberOfRayCasts'] -= X['VARNumberOfRayCasts'].mean()
     X['VARFOV'] -= X['VARFOV'].mean()
     X['VARAllowedEnergy'] -= X['VARAllowedEnergy'].mean()
     X['VARtargetMaxTurn'] -= X['VARtargetMaxTurn'].mean()
+
+    X['ray_count_fov'] = X['VARNumberOfRayCasts'] * X['VARFOV']
+    X['energy_constraint_turn_sharpness'] = X['VARAllowedEnergy'] * X['VARtargetMaxTurn']
+    X['ray_count_energy_constraint'] = X['VARNumberOfRayCasts'] * X['VARAllowedEnergy']
+    X['fov_turn_sharpness'] = X['VARFOV'] * X['VARtargetMaxTurn']
+    X['ray_count_turn_sharpness'] = X['VARNumberOfRayCasts'] * X['VARtargetMaxTurn']
+    X['fov_energy_constraint'] = X['VARFOV'] * X['VARAllowedEnergy']
 
     X = sm.add_constant(X)
 
@@ -112,15 +119,17 @@ def interactions_logistic_regression(data):
 
     return result
 
-def bootstrap_success_rate(data, iterations=10000):
-    agent_ids = data['agent_id'].unique()
+def bootstrap_success_rate(data, iterations = 10000, seed = 42):
+    rng = np.random.default_rng(seed)
+    groups = {agent_id: group['success'].to_numpy() for agent_id, group in data.groupby('agent_id')}
+    agent_ids = list(groups)
 
     bootstrap_rates = []
 
     for i in range(iterations):
-        bootstrap_samples = np.random.choice(agent_ids, size=len(agent_ids), replace=True)
-        bootstrap_sample = pd.concat([data[data['agent_id'] == agent_id] for agent_id in bootstrap_samples]).copy()
-        bootstrap_rates.append(bootstrap_sample['success'].mean())
+        bootstrap_samples = rng.choice(agent_ids, size = len(agent_ids), replace = True)
+        bootstrap_sample = np.concatenate([groups[agent_id] for agent_id in bootstrap_samples])
+        bootstrap_rates.append(bootstrap_sample.mean())
 
     bootstrap_rates = np.asarray(bootstrap_rates)
 
@@ -129,16 +138,18 @@ def bootstrap_success_rate(data, iterations=10000):
 
     return bootstrap_rates.mean(), lower_percentitle, upper_percentitle
 
-def bootstrap_odds_ratios(data, iterations=10000):
+def bootstrap_odds_ratios(data, iterations = 1000, seed = 42):
     variables = ['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn']
     variable_and_increments = {'VARNumberOfRayCasts': 8, 'VARFOV': 90, 'VARAllowedEnergy': 30, 'VARtargetMaxTurn': 0.5}
     bootstrap_ratios = []
     successful_models = 0
-    agent_ids = data['agent_id'].unique()
+    rng = np.random.default_rng(seed)
+    groups = {agent_id: group for agent_id, group in data.groupby('agent_id')}
+    agent_ids = list(groups)
 
     for i in range(iterations):
-        bootstrap_sample = np.random.choice(agent_ids, size=len(agent_ids), replace=True)
-        bootstrap_samples = pd.concat([data[data['agent_id'] == agent_id] for agent_id in bootstrap_sample]).copy()
+        bootstrap_sample = rng.choice(agent_ids, size = len(agent_ids), replace = True)
+        bootstrap_samples = pd.concat([groups[agent_id] for agent_id in bootstrap_sample], ignore_index = True)
 
         X = sm.add_constant(bootstrap_samples[variables])
         y = bootstrap_samples['success']
@@ -152,7 +163,7 @@ def bootstrap_odds_ratios(data, iterations=10000):
                 odds_ratio = np.exp(result.params[variable]*increment)
                 odds_ratios[variable] = odds_ratio
 
-            bootstrap_ratios.append(odds_ratios)
+            bootstrap_ratios.append([odds_ratios[variable] for variable in variables])
 
             successful_models += 1
         except Exception:

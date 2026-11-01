@@ -1,4 +1,4 @@
-from stats_analytics import logistic_regression, interactions_logistic_regression
+from stats_analytics import logistic_regression
 import statsmodels.api as sm
 import pandas as pd
 import numpy as np
@@ -6,14 +6,14 @@ import matplotlib.pyplot as plt
 import glob
 import os
 
-fileseval = glob.glob('policy_eval_results/*/EpisodeData_eval_sweep_*.csv')
+fileseval = glob.glob('policy_eval_results/agent_*/EpisodeData_eval_sweep_*.csv')
 
 all_dataa = []
 
 for file in fileseval:
     dataaaa = pd.read_csv(file)
 
-    agent_id = os.path.basename(file).replace('csv', '')
+    agent_id = os.path.basename(file).replace('EpisodeData_eval_sweep_', '').replace('.csv', '')
     dataaaa['agent_id'] = agent_id
 
     all_dataa.append(dataaaa)
@@ -48,7 +48,7 @@ for column, readable_name in converting_to_read:
     plt.show()
     plt.close()
 
-result = logistic_regression(data)
+result = logistic_regression(dataaaaa)
 
 averages = dataaaaa[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn']].mean()
 
@@ -82,7 +82,7 @@ all_data = []
 for file in files:
     dataa = pd.read_csv(file)
 
-    agent_id = os.path.basename(file).replace('csv', '')
+    agent_id = os.path.basename(file).replace('EpisodeData_sweep_', '').replace('.csv', '')
     dataa['agent_id'] = agent_id
 
     all_data.append(dataa)
@@ -91,9 +91,10 @@ training_dataa = pd.concat(all_data, ignore_index=True)
 
 training_data = pd.merge(training_dataa, conditions, on='agent_id', how='left')
 
-training_data['episode_group'] = ((training_data['episode'] - 1) // 1000) * 1000
+training_data['episode_group'] = (training_data['episode'] // 1000) * 1000
 
-average_success_stuff = training_data.groupby('episode_group')['success'].mean().reset_index()
+agent_success = training_data.groupby(['agent_id', 'episode_group'])['success'].mean().reset_index()
+average_success_stuff = agent_success.groupby('episode_group')['success'].mean().reset_index()
 average_success_stuff['success'] *= 100
 
 plt.figure(figsize=(8, 5))
@@ -116,7 +117,7 @@ accuracy_stuff = dataaaaa.groupby('accuracy_group')['success'].mean().reset_inde
 accuracy_stuff['success'] *= 100
 
 plt.figure(figsize=(8,5))
-plt.plot(accuracy_stuff['accuracy'], accuracy_stuff['success'])
+plt.plot(accuracy_stuff['accuracy_group'], accuracy_stuff['success'])
 plt.title("Success Rate vs. Accuracy Compared to A* Path")
 plt.xlabel("Accuracy")
 plt.ylabel("Success Rate")
@@ -149,9 +150,10 @@ plt.show()
 plt.close()
 
 difficulty_for_success = dataaaaa.groupby('difficulty_group')['success'].mean().reset_index()
+difficulty_for_success['success'] *= 100
 
 plt.figure(figsize=(8,5))
-plt.plot(difficulty_for_success['difficulty'], difficulty_for_success['success'])
+plt.plot(difficulty_for_success['difficulty_group'], difficulty_for_success['success'])
 plt.title("Success Rate vs. Maze Difficulty")
 plt.xlabel("Difficulty")
 plt.ylabel("Success Rate")
