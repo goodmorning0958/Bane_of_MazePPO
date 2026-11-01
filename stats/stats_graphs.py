@@ -14,13 +14,13 @@ for file in fileseval:
     dataaaa = pd.read_csv(file)
 
     agent_id = os.path.basename(file).replace('EpisodeData_eval_sweep_', '').replace('.csv', '')
-    dataaaa['agent_id'] = agent_id
+    dataaaa['agent_id'] = int(agent_id)
 
     all_dataa.append(dataaaa)
 
 eval_data = pd.concat(all_dataa, ignore_index=True)
 
-conditions = pd.read_csv('training_results/manifest.csv')
+conditions = pd.read_csv('training_results/manifest.csv').rename(columns = {'index': 'agent_id'})
 
 dataaaaa = pd.merge(eval_data, conditions, on='agent_id', how='left')
 
@@ -80,10 +80,10 @@ files = glob.glob('training_results/agent_*/EpisodeData_sweep_*.csv')
 all_data = []
 
 for file in files:
-    dataa = pd.read_csv(file)
+    dataa = pd.read_csv(file, usecols = ['episode', 'success'])
 
     agent_id = os.path.basename(file).replace('EpisodeData_sweep_', '').replace('.csv', '')
-    dataa['agent_id'] = agent_id
+    dataa['agent_id'] = int(agent_id)
 
     all_data.append(dataa)
 
@@ -112,6 +112,7 @@ plt.savefig(filename, dpi=300)
 plt.show()
 plt.close()
 
+dataaaaa = dataaaaa[np.isfinite(dataaaaa['accuracy'])].copy()
 dataaaaa['accuracy_group'] = dataaaaa['accuracy'] // 1
 accuracy_stuff = dataaaaa.groupby('accuracy_group')['success'].mean().reset_index()
 accuracy_stuff['success'] *= 100
@@ -131,15 +132,14 @@ plt.savefig(filename, dpi=300)
 plt.show()
 plt.close()
 
-dataaaaa['difficulty_group'] = (dataaaaa['difficulty_x'] // 5) * 5
+dataaaaa['difficulty_group'] = dataaaaa['stage']
 accuracy_for_difficulty = dataaaaa.groupby('difficulty_group')['accuracy'].mean().reset_index()
 
 plt.figure(figsize=(8,5))
 plt.plot(accuracy_for_difficulty['difficulty_group'], accuracy_for_difficulty['accuracy'])
 plt.title("Accuracy Compared to A* Path vs. Maze Difficulty")
-plt.xlabel("Difficulty")
+plt.xlabel("Difficulty (curriculum stage)")
 plt.ylabel("Accuracy")
-plt.ylim(-5, 105)
 plt.grid(True, alpha=0.4)
 plt.tight_layout()
 
@@ -155,7 +155,7 @@ difficulty_for_success['success'] *= 100
 plt.figure(figsize=(8,5))
 plt.plot(difficulty_for_success['difficulty_group'], difficulty_for_success['success'])
 plt.title("Success Rate vs. Maze Difficulty")
-plt.xlabel("Difficulty")
+plt.xlabel("Difficulty (curriculum stage)")
 plt.ylabel("Success Rate")
 plt.ylim(-5, 105)
 plt.grid(True, alpha=0.4)
