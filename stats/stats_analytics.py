@@ -31,22 +31,6 @@ def logistic_regression(data):
 
     model = sm.Logit(y, X)
     result = model.fit(disp=0)
-<<<<<<< HEAD
-
-    return result
-
-def linear_regression(data, dtype):
-    mask = data['final_success_binary'] == 1
-    successful = data[mask]
-
-    X = successful[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn']]
-    X = sm.add_constant(X)
-    y = np.log(successful[dtype])
-
-    model = sm.OLS(y, X)
-    result = model.fit(disp=0)
-=======
->>>>>>> f59ee730d63d1d81864b197326cc29ca4d16c0e8
 
     return result
 
