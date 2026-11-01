@@ -34,6 +34,19 @@ def logistic_regression(data):
 
     return result
 
+def linear_regression(data, dtype):
+    mask = data['final_success_binary'] == 1
+    successful = data[mask]
+
+    X = successful[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn']]
+    X = sm.add_constant(X)
+    y = np.log(successful[dtype])
+
+    model = sm.OLS(y, X)
+    result = model.fit()
+
+    return result
+
 def extra_stats(result):
     variable_and_increments = {'VARNumberOfRayCasts': 8, 'VARFOV': 90, 'VARAllowedEnergy': 30, 'VARtargetMaxTurn': 0.5}
 
