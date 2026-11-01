@@ -24,13 +24,26 @@ def latin_hypercube_sampling(samples):
     return lhs_configurations
 
 def logistic_regression(data):
-    X = data[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn']]
+    X = data[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn']].copy()
     X = sm.add_constant(X)
 
-    y = data['final_success_binary']
+    y = data['success']
 
     model = sm.Logit(y, X)
-    result = model.fit()
+    result = model.fit(disp=0)
+
+    return result
+
+def linear_regression(data, dtype):
+    mask = data['final_success_binary'] == 1
+    successful = data[mask]
+
+    X = successful[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn']]
+    X = sm.add_constant(X)
+    y = np.log(successful[dtype])
+
+    model = sm.OLS(y, X)
+    result = model.fit(disp=0)
 
     return result
 
@@ -46,7 +59,7 @@ def roc_auc(result, data):
     X = data[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn']]
     X = sm.add_constant(X)
 
-    y = data['final_success_binary']
+    y = data['success']
     predicted_probability = result.predict(X)
 
     auc = roc_auc_score(y, predicted_probability)
@@ -57,7 +70,7 @@ def roc_auc(result, data):
     return fpr, tpr, thresholds, auc
 
 def roc_auc_for_interactions(result, data):
-    X = data[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn', 'ray_count_fov', 'energy_constraint_turn_sharpness', 'ray_count_energy_constraint', 'fov_turn_sharpness', 'ray_count_turn_sharpness', 'fov_energy_constraint']]
+    X = data[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn', 'ray_count_fov', 'energy_constraint_turn_sharpness', 'ray_count_energy_constraint', 'fov_turn_sharpness', 'ray_count_turn_sharpness', 'fov_energy_constraint']].copy()
 
     X['VARNumberOfRayCasts'] -= X['VARNumberOfRayCasts'].mean()
     X['VARFOV'] -= X['VARFOV'].mean()
@@ -66,7 +79,7 @@ def roc_auc_for_interactions(result, data):
 
     X = sm.add_constant(X)
 
-    y = data['final_success_binary']
+    y = data['success']
     predicted_probability = result.predict(X)
 
     auc = roc_auc_score(y, predicted_probability)
@@ -92,10 +105,10 @@ def interactions_logistic_regression(data):
     X['fov_energy_constraint'] = X['VARFOV'] * X['VARAllowedEnergy']
 
     X = sm.add_constant(X)
-    y = data['final_success_binary']
+    y = data['success']
 
     model = sm.Logit(y, X)
-    result = model.fit()
+    result = model.fit(disp=0)
 
     return result
 
@@ -126,7 +139,7 @@ def bootstrap_odds_ratios(data, iterations=10000):
         bootstrap_samples = data.iloc[bootstrap_sample]
 
         X = sm.add_constant(bootstrap_samples[variables])
-        y = bootstrap_samples['final_success_binary']
+        y = bootstrap_samples['success']
 
         try:
             model = sm.Logit(y, X)
