@@ -6,12 +6,28 @@ import matplotlib.pyplot as plt
 import glob
 import os
 
-data = pd.read_csv('runs/sweep_81_v5/manifest.csv')
+fileseval = glob.glob('policy_eval_results/*/EpisodeData_eval_sweep_*.csv')
 
-required_columns = ['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn', 'final_success_binary']
-assert all(col in data.columns for col in required_columns)
+all_dataa = []
 
-configurations_groups = data.groupby(['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn'], as_index=False).agg(success_rate=('final_success_binary', 'mean'))
+for file in fileseval:
+    dataaaa = pd.read_csv(file)
+
+    agent_id = os.path.basename(file).replace('csv', '')
+    dataaaa['agent_id'] = agent_id
+
+    all_dataa.append(dataaaa)
+
+eval_data = pd.concat(all_dataa, ignore_index=True)
+
+conditions = pd.read_csv('training_results/manifest.csv')
+
+dataaaaa = pd.merge(eval_data, conditions, on='agent_id', how='left')
+
+required_columns = ['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn', 'success']
+assert all(col in dataaaaa.columns for col in required_columns)
+
+configurations_groups = dataaaaa.groupby(['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn'], as_index=False).agg(success_rate=('success', 'mean'))
 
 configurations_groups['success_rate'] *= 100
 
@@ -34,10 +50,10 @@ for column, readable_name in converting_to_read:
 
 result = logistic_regression(data)
 
-averages = data[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn']].mean()
+averages = dataaaaa[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn']].mean()
 
 for column, readable_name in converting_to_read:
-    x_axis = np.linspace(data[column].min(), data[column].max(), 100)
+    x_axis = np.linspace(dataaaaa[column].min(), dataaaaa[column].max(), 100)
     predictions = pd.DataFrame({'VARNumberOfRayCasts': averages['VARNumberOfRayCasts'], 'VARFOV': averages['VARFOV'], 'VARAllowedEnergy': averages['VARAllowedEnergy'], 'VARtargetMaxTurn': averages['VARtargetMaxTurn']}, index=range(len(x_axis)))
     predictions[column] = x_axis
 
@@ -59,7 +75,7 @@ for column, readable_name in converting_to_read:
     plt.show()
     plt.close()
 
-files = glob.glob('runs/sweep_81_v5/*/EpisodeData_seep_*.csv')
+files = glob.glob('training_results/agent_*/EpisodeData_sweep_*.csv')
 
 all_data = []
 
@@ -71,7 +87,9 @@ for file in files:
 
     all_data.append(dataa)
 
-training_data = pd.concat(all_data, ignore_index=True)
+training_dataa = pd.concat(all_data, ignore_index=True)
+
+training_data = pd.merge(training_dataa, conditions, on='agent_id', how='left')
 
 training_data['episode_group'] = ((training_data['episode'] - 1) // 1000) * 1000
 
@@ -93,8 +111,8 @@ plt.savefig(filename, dpi=300)
 plt.show()
 plt.close()
 
-training_data['accuracy_group'] = training_data['accuracy'] // 1
-accuracy_stuff = training_data.groupby('accuracy_group')['success'].mean().reset_index()
+dataaaaa['accuracy_group'] = dataaaaa['accuracy'] // 1
+accuracy_stuff = dataaaaa.groupby('accuracy_group')['success'].mean().reset_index()
 accuracy_stuff['success'] *= 100
 
 plt.figure(figsize=(8,5))
@@ -112,8 +130,8 @@ plt.savefig(filename, dpi=300)
 plt.show()
 plt.close()
 
-training_data['difficulty_group'] = (training_data['difficulty_x'] // 5) * 5
-accuracy_for_difficulty = training_data.groupby('difficulty_group')['accuracy'].mean().reset_index()
+dataaaaa['difficulty_group'] = (dataaaaa['difficulty_x'] // 5) * 5
+accuracy_for_difficulty = dataaaaa.groupby('difficulty_group')['accuracy'].mean().reset_index()
 
 plt.figure(figsize=(8,5))
 plt.plot(accuracy_for_difficulty['difficulty_group'], accuracy_for_difficulty['accuracy'])
@@ -125,6 +143,23 @@ plt.grid(True, alpha=0.4)
 plt.tight_layout()
 
 filename = "accuracy_vs_maze_difficulty.png"
+plt.savefig(filename, dpi=300)
+
+plt.show()
+plt.close()
+
+difficulty_for_success = dataaaaa.groupby('difficulty_group')['success'].mean().reset_index()
+
+plt.figure(figsize=(8,5))
+plt.plot(difficulty_for_success['difficulty'], difficulty_for_success['success'])
+plt.title("Success Rate vs. Maze Difficulty")
+plt.xlabel("Difficulty")
+plt.ylabel("Success Rate")
+plt.ylim(-5, 105)
+plt.grid(True, alpha=0.4)
+plt.tight_layout()
+
+filename = "success_rate_vs_maze_difficulty.png"
 plt.savefig(filename, dpi=300)
 
 plt.show()
