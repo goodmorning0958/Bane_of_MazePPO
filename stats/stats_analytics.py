@@ -99,14 +99,15 @@ def interactions_logistic_regression(data):
 
     return result
 
-def bootstrap_success_rate(success, iterations=10000):
-    success = np.asarray(success)
+def bootstrap_success_rate(data, iterations=10000):
+    agent_ids = data['agent_id'].unique()
 
     bootstrap_rates = []
 
     for i in range(iterations):
-        bootstrap_sample = np.random.choice(success, size=len(success), replace=True)
-        bootstrap_rates.append(bootstrap_sample.mean())
+        bootstrap_samples = np.random.choice(agent_ids, size=len(agent_ids), replace=True)
+        bootstrap_sample = pd.concat([data[data['agent_id'] == agent_id] for agent_id in bootstrap_samples]).copy()
+        bootstrap_rates.append(bootstrap_sample['success'].mean())
 
     bootstrap_rates = np.asarray(bootstrap_rates)
 
@@ -120,10 +121,11 @@ def bootstrap_odds_ratios(data, iterations=10000):
     variable_and_increments = {'VARNumberOfRayCasts': 8, 'VARFOV': 90, 'VARAllowedEnergy': 30, 'VARtargetMaxTurn': 0.5}
     bootstrap_ratios = []
     successful_models = 0
+    agent_ids = data['agent_id'].unique()
 
     for i in range(iterations):
-        bootstrap_sample = np.random.choice(len(data), size=len(data), replace=True)
-        bootstrap_samples = data.iloc[bootstrap_sample]
+        bootstrap_sample = np.random.choice(agent_ids, size=len(agent_ids), replace=True)
+        bootstrap_samples = pd.concat([data[data['agent_id'] == agent_id] for agent_id in bootstrap_sample]).copy()
 
         X = sm.add_constant(bootstrap_samples[variables])
         y = bootstrap_samples['success']

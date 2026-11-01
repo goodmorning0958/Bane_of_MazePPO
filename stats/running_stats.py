@@ -31,7 +31,7 @@ extra_stats(result, data)
 for variable, interval in odds_ratios_confidence_intervals.items():
     print(f"\n{variable} Bootstrap 95% Confidence Interval: ({interval['lower_percentitle']:.3f}, {interval['upper_percentitle']:.3f})")
 
-overall_success_rate, lower_percentile, upper_percentile = bootstrap_success_rate(data['final_success_binary'])
+overall_success_rate, lower_percentile, upper_percentile = bootstrap_success_rate(data)
 print(f"\nOverall Success Rate: {overall_success_rate:.3%}")
 print(f"\n95% Bootstrap Confidence Interval: ({lower_percentile:.3%}, {upper_percentile:.3%})")
 
