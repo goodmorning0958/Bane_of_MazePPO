@@ -10,8 +10,8 @@ all_data = []
 for file in files:
     dataa = pd.read_csv(file)
 
-    agent_id = os.path.basename(file).replace('csv', '')
-    dataa['agend_id'] = agent_id
+    agent_id = os.path.basename(file).replace('EpisodeData_eval_sweep_', '').replace('.csv', '')
+    dataa['agent_id'] = agent_id
 
     all_data.append(dataa)
 
@@ -19,7 +19,7 @@ dataaa = pd.concat(all_data, ignore_index=True)
 
 conditions = pd.read_csv('training_results/manifest.csv')
 
-data = pd.merge(conditions, on='agent_id', how='left')
+data = pd.merge(dataaa, conditions, on='agent_id', how='left')
 
 result = logistic_regression(data)
 odds_ratios_confidence_intervals = bootstrap_odds_ratios(data)

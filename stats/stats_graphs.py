@@ -22,7 +22,7 @@ eval_data = pd.concat(all_dataa, ignore_index=True)
 
 conditions = pd.read_csv('training_results/manifest.csv')
 
-dataaaaa = pd.merge(conditions, on='agent_id', how='left')
+dataaaaa = pd.merge(eval_data, conditions, on='agent_id', how='left')
 
 required_columns = ['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn', 'success']
 assert all(col in dataaaaa.columns for col in required_columns)
@@ -87,7 +87,9 @@ for file in files:
 
     all_data.append(dataa)
 
-training_data = pd.concat(all_data, ignore_index=True)
+training_dataa = pd.concat(all_data, ignore_index=True)
+
+training_data = pd.merge(training_dataa, conditions, on='agent_id', how='left')
 
 training_data['episode_group'] = ((training_data['episode'] - 1) // 1000) * 1000
 
