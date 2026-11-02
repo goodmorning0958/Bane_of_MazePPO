@@ -36,7 +36,7 @@ def logistic_regression(data):
 
 def linear_regression(data, dtype):
     mask = data['success'] == 1
-    mask = data[dtype] == 1
+
     successful = data[mask]
 
     X = successful[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn']]

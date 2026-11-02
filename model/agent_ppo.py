@@ -14,6 +14,7 @@ import sys
 import random
 from collections import deque
 from pathlib import Path
+from environment.physics import step
 
 from model.actor_critic import (
     ActorCritic,

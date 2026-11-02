@@ -19,16 +19,13 @@ for file in fileseval:
     all_dataa.append(dataaaa)
 
 eval_data = pd.concat(all_dataa, ignore_index=True)
-
 conditions = pd.read_csv('training_results/manifest.csv').rename(columns = {'index': 'agent_id'})
-
 dataaaaa = pd.merge(eval_data, conditions, on='agent_id', how='left')
 
 required_columns = ['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn', 'success']
 assert all(col in dataaaaa.columns for col in required_columns)
 
 configurations_groups = dataaaaa.groupby(['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn'], as_index=False).agg(success_rate=('success', 'mean'))
-
 configurations_groups['success_rate'] *= 100
 
 converting_to_read = [('VARNumberOfRayCasts', 'Ray Count'), ('VARFOV', 'Field of View (Degrees)'), ('VARAllowedEnergy', 'Allowed Energy'), ('VARtargetMaxTurn', 'Turn Sharpness')]

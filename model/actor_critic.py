@@ -227,6 +227,7 @@ class ActorCritic(nn.Module):
         energy_value = move_joules(turn, step_size)
         energy_value = float(energy_value)
         raw_energy = max(0.0, energy_value)
+        
         angle_diff = abs((new_angle - angle + math.pi) % (2 * math.pi) - math.pi)
         turn_cost = float(self.w_turn.item()) * angle_diff
 
@@ -342,8 +343,10 @@ class ActorCritic(nn.Module):
         max_ray_distance = 0
         ray_count = int(VarNumberOfRayCasts)
         max_distance = float(maze_size if VARRayDistance is None else VARRayDistance)
+
         if not math.isfinite(max_distance) or max_distance <= 0:
             max_distance = max(float(maze_size), 1.0)
+
         ray_offset = float(Rayangle.detach().item()) if torch.is_tensor(Rayangle) else float(Rayangle)
         fov = _fov_to_radians(VARFOV)
 
@@ -353,6 +356,7 @@ class ActorCritic(nn.Module):
             relative_angles = [(2 * math.pi) * i / ray_count - math.pi for i in range(ray_count)]
         else:
             relative_angles = [fov * (i / (ray_count - 1) - 0.5) for i in range(ray_count)]
+
         for i in range(ray_count):
             ray_angle = float(angle) + relative_angles[i] + ray_offset
             ray_vec = np.array([np.cos(ray_angle), np.sin(ray_angle)], dtype=np.float32)

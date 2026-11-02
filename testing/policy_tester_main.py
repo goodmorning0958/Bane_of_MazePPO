@@ -1,4 +1,4 @@
-from model import StartAgent
+from model.Policy_tester import StartAgent
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 import itertools
@@ -9,9 +9,9 @@ import torch
 
 rollouts = 1800
 max_workers = 7
-agents = None
-policies = Path("runs") / "sweep_81_v5"
-out = Path("runs") / "eval_81_v5"
+agents = range(0, 81)
+policies = Path("training_results")
+out = Path("policy_eval_results")
 
 grid = {
     "VARNumberOfRayCasts": [24, 16, 8],

@@ -3,13 +3,8 @@
   "rollouts": 100000,
   "h1": 48,
   "h2": 24,
-<<<<<<<< HEAD:runs/sweep_81_v5/agent_038_seed_42/RunConfig_38.json
   "inputs": 22,
   "rays": 16,
-========
-  "inputs": 14,
-  "rays": 8,
->>>>>>>> 64873beafa4c6a05df09455b921aba25128e5b41:runs/sweep_81_v5/agent_065_seed_42/RunConfig_65.json
   "fov_radians": 3.141592653589793,
   "ray_distance": null,
   "energy_budget": 150,
@@ -62,15 +57,9 @@
   "hard_energy_limit": true,
   "log_std_min": -2.0,
   "ray_scale": 24.0,
-<<<<<<<< HEAD:runs/sweep_81_v5/agent_038_seed_42/RunConfig_38.json
   "param_count": 4641,
   "actor_param_count": 2330,
   "actor_macs_per_inference": 2256,
-========
-  "param_count": 3873,
-  "actor_param_count": 1946,
-  "actor_macs_per_inference": 1872,
->>>>>>>> 64873beafa4c6a05df09455b921aba25128e5b41:runs/sweep_81_v5/agent_065_seed_42/RunConfig_65.json
   "ppo_epochs": 8,
   "minibatch_size": 64,
   "target_kl": 0.02,
