@@ -1,0 +1,131 @@
+Successful Models: 1000/1000
+Regular Logistic Regression Results:
+                           Logit Regression Results                           
+==============================================================================
+Dep. Variable:                success   No. Observations:               145800
+Model:                          Logit   Df Residuals:                   145795
+Method:                           MLE   Df Model:                            4
+Date:                Mon, 02 Nov 2026   Pseudo R-squ.:               0.0006438
+Time:                        18:55:34   Log-Likelihood:                -99539.
+converged:                       True   LL-Null:                       -99604.
+Covariance Type:            nonrobust   LLR p-value:                 9.262e-27
+=======================================================================================
+                          coef    std err          z      P>|z|      [0.025      0.975]
+---------------------------------------------------------------------------------------
+const                  -0.3462      0.020    -17.001      0.000      -0.386      -0.306
+VARNumberOfRayCasts     0.0025      0.001      3.053      0.002       0.001       0.004
+VARFOV              -3.663e-05   4.72e-05     -0.777      0.437      -0.000    5.58e-05
+VARAllowedEnergy        0.0009      0.000      8.943      0.000       0.001       0.001
+VARtargetMaxTurn       -0.0287      0.005     -6.195      0.000      -0.038      -0.020
+=======================================================================================
+
+Regular Logistic Regression AIC: 199088.84019876833
+Linear regression results:
+                            OLS Regression Results                            
+==============================================================================
+Dep. Variable:       physics_energy_J   R-squared:                       0.107
+Model:                            OLS   Adj. R-squared:                  0.107
+Method:                 Least Squares   F-statistic:                     1883.
+Date:                Mon, 02 Nov 2026   Prob (F-statistic):               0.00
+Time:                        18:55:34   Log-Likelihood:                -22362.
+No. Observations:               62610   AIC:                         4.473e+04
+Df Residuals:                   62605   BIC:                         4.478e+04
+Df Model:                           4                                         
+Covariance Type:            nonrobust                                         
+=======================================================================================
+                          coef    std err          t      P>|t|      [0.025      0.975]
+---------------------------------------------------------------------------------------
+const                   3.3779      0.005    630.505      0.000       3.367       3.388
+VARNumberOfRayCasts     0.0025      0.000     11.998      0.000       0.002       0.003
+VARFOV                 -0.0001   1.24e-05     -9.055      0.000      -0.000    -8.8e-05
+VARAllowedEnergy        0.0023    2.7e-05     85.041      0.000       0.002       0.002
+VARtargetMaxTurn        0.0098      0.001      8.137      0.000       0.007       0.012
+==============================================================================
+Omnibus:                      747.886   Durbin-Watson:                   1.549
+Prob(Omnibus):                  0.000   Jarque-Bera (JB):              863.556
+Skew:                           0.218   Prob(JB):                    3.03e-188
+Kurtosis:                       3.376   Cond. No.                         969.
+==============================================================================
+
+Notes:
+[1] Standard Errors assume that the covariance matrix of the errors is correctly specified.
+                            OLS Regression Results                            
+==============================================================================
+Dep. Variable:        path_efficiency   R-squared:                       0.023
+Model:                            OLS   Adj. R-squared:                  0.023
+Method:                 Least Squares   F-statistic:                     368.6
+Date:                Mon, 02 Nov 2026   Prob (F-statistic):          2.53e-314
+Time:                        18:55:34   Log-Likelihood:                 7596.7
+No. Observations:               62610   AIC:                        -1.518e+04
+Df Residuals:                   62605   BIC:                        -1.514e+04
+Df Model:                           4                                         
+Covariance Type:            nonrobust                                         
+=======================================================================================
+                          coef    std err          t      P>|t|      [0.025      0.975]
+---------------------------------------------------------------------------------------
+const                  -0.1369      0.003    -41.245      0.000      -0.143      -0.130
+VARNumberOfRayCasts     0.0018      0.000     13.639      0.000       0.002       0.002
+VARFOV               5.914e-05   7.69e-06      7.693      0.000    4.41e-05    7.42e-05
+VARAllowedEnergy       -0.0004   1.68e-05    -24.586      0.000      -0.000      -0.000
+VARtargetMaxTurn       -0.0194      0.001    -25.968      0.000      -0.021      -0.018
+==============================================================================
+Omnibus:                    34988.544   Durbin-Watson:                   1.964
+Prob(Omnibus):                  0.000   Jarque-Bera (JB):           323033.728
+Skew:                          -2.572   Prob(JB):                         0.00
+Kurtosis:                      12.868   Cond. No.                         969.
+==============================================================================
+
+Notes:
+[1] Standard Errors assume that the covariance matrix of the errors is correctly specified.
+ROC-AUC: 0.518
+
+Odds Ratios:
+
+VARNumberOfRayCasts: 1.01999 (per 8 increase in VARNumberOfRayCasts)
+
+VARFOV: 0.99671 (per 90 increase in VARFOV)
+
+VARAllowedEnergy: 1.02820 (per 30 increase in VARAllowedEnergy)
+
+VARtargetMaxTurn: 0.98577 (per 0.5 increase in VARtargetMaxTurn)
+
+VARNumberOfRayCasts Bootstrap 95% Confidence Interval: (0.975, 1.071)
+
+VARFOV Bootstrap 95% Confidence Interval: (0.965, 1.028)
+
+VARAllowedEnergy Bootstrap 95% Confidence Interval: (1.002, 1.054)
+
+VARtargetMaxTurn Bootstrap 95% Confidence Interval: (0.969, 1.003)
+
+Overall Success Rate: 42.942%
+
+95% Bootstrap Confidence Interval: (41.947%, 43.925%)
+
+Logistic Regression with Interactions Results:
+                           Logit Regression Results                           
+==============================================================================
+Dep. Variable:                success   No. Observations:               145800
+Model:                          Logit   Df Residuals:                   145789
+Method:                           MLE   Df Model:                           10
+Date:                Mon, 02 Nov 2026   Pseudo R-squ.:                0.001957
+Time:                        18:55:51   Log-Likelihood:                -99409.
+converged:                       True   LL-Null:                       -99604.
+Covariance Type:            nonrobust   LLR p-value:                 1.311e-77
+====================================================================================================
+                                       coef    std err          z      P>|z|      [0.025      0.975]
+----------------------------------------------------------------------------------------------------
+const                               -0.2849      0.005    -53.765      0.000      -0.295      -0.274
+VARNumberOfRayCasts                  0.0025      0.001      3.043      0.002       0.001       0.004
+VARFOV                           -3.401e-05   4.72e-05     -0.721      0.471      -0.000    5.85e-05
+VARAllowedEnergy                     0.0009      0.000      8.859      0.000       0.001       0.001
+VARtargetMaxTurn                    -0.0286      0.005     -6.173      0.000      -0.038      -0.020
+ray_count_fov                    -1.572e-05   7.23e-06     -2.176      0.030   -2.99e-05   -1.56e-06
+energy_constraint_turn_sharpness    -0.0010   9.08e-05    -11.296      0.000      -0.001      -0.001
+ray_count_energy_constraint       4.203e-05   1.59e-05      2.645      0.008    1.09e-05    7.32e-05
+fov_turn_sharpness                   0.0004   4.12e-05      8.790      0.000       0.000       0.000
+ray_count_turn_sharpness            -0.0003      0.001     -0.488      0.626      -0.002       0.001
+fov_energy_constraint            -6.051e-06   9.25e-07     -6.542      0.000   -7.86e-06   -4.24e-06
+====================================================================================================
+
+Interactions Logistic Regression AIC: 198839.1564782398
+ROC-AUC: 0.530
