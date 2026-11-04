@@ -36,7 +36,7 @@ grid = {
     "VARAllowedEnergy": [150, 60, 30],
     "VARtargetMaxTurn": [3.14159, 1.0, 0.5],
 }
-constants = {"MAX_STEP_START": 1.5, "MAX_STEP_END": 1.5}   
+constants = {"max_step_start": 1.5, "max_step_end": 1.5}   
 
 def stop_timestamp():
     if stop_at is None:

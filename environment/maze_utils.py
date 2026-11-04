@@ -8,9 +8,12 @@ raycaster_env = Tree()
 def _fov_to_radians(value):
     if value is None:
         return math.pi / 2
+    
     value = float(value)
+
     if value > 2 * math.pi:
         value = math.radians(value)
+        
     return min(max(value, 0.0), 2 * math.pi)
 
 def _build_bsp_tree(walls):

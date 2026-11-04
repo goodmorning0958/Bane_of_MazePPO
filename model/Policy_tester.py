@@ -11,25 +11,25 @@ from pathlib import Path
 
 from model.actor_critic import (
     ActorCritic,
-    RAY_SCALE,
+    ray_scale,
 )
 from environment.maze_utils import _build_bsp_tree
 from environment.energy_lookup_table import move_joules
 
 # Flags
-ROLLOUTS = 3000
-SEED = 42
-CURRICULUM_STAGES = [30, 40, 50, 51, 52, 54, 55, 56, 53]
-STALL_WINDOW = 20                  
-STALL_MIN_DISPLACEMENT = 2.0     
-STALL_END_PENALTY = 1.0
+rollouts_default = 3000
+seed = 42
+curriculum_stages = [30, 40, 50, 51, 52, 54, 55, 56, 53]
+stall_window = 20                  
+stall_min_displacement = 2.0     
+stall_end_penalty = 1.0
 
 # main
-def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARWeightInitType, VARtargetMaxTurn, agnt, VARFOV, VARRayDistance, *, seed=SEED, rollouts=None, output_dir=None):
-    rollouts = ROLLOUTS if rollouts is None else int(rollouts)
+def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARWeightInitType, VARtargetMaxTurn, agnt, varfov, VARRayDistance, *, seed = seed, rollouts = None, output_dir = None):
+    rollouts = rollouts_default if rollouts is None else int(rollouts)
 
     directory = Path(output_dir) if output_dir is not None else Path("runs") / f"agent_{agnt}_seed_{seed}_{time.time_ns()}"
-    directory.mkdir(parents=True, exist_ok=True)
+    directory.mkdir(parents = True, exist_ok = True)
     test = "eval_" + test
     success_rate = 0.0
     episode_count = 0
@@ -39,8 +39,8 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
     start_time = time.perf_counter()
 
     # classes
-    network = ActorCritic(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, VARFOV, NNinputs)
-    network.load_state_dict(torch.load(directory / f"Policy_{agnt}.pt", weights_only=False)["model_state_dict"])
+    network = ActorCritic(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, varfov, NNinputs)
+    network.load_state_dict(torch.load(directory / f"Policy_{agnt}.pt", weights_only = False)["model_state_dict"])
     network.set_max_step(0.0)
     random.seed(seed)
     np.random.seed(seed)
@@ -54,26 +54,26 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
     }
 
     for name, header in headers.items():
-        with open(directory / f"{name}_{test}{agnt}.csv", "w", newline="", encoding="utf-8") as f:
+        with open(directory / f"{name}_{test}{agnt}.csv", "w", newline = "", encoding = "utf-8") as f:
             csv.writer(f).writerow(header)
 
     for _rollout in range(episode_count, rollouts):
-        x = random.choice(CURRICULUM_STAGES)
+        x = random.choice(curriculum_stages)
         
         # get training example
         start_point, end_point, maze_size, grid_distance, walls, pixel_grid = get_new_training_example(x, network.k, network.sd)
-        robot_pos = np.array(start_point, dtype=np.float32)
-        end_point = np.array(end_point, dtype=np.float32)
-        walls_np, BSP = _build_bsp_tree(walls)
+        robot_pos = np.array(start_point, dtype = np.float32)
+        end_point = np.array(end_point, dtype = np.float32)
+        walls_np, bsp = _build_bsp_tree(walls)
         robot_pos = robot_pos + 0.5
         end_point = end_point + 0.5
-        episode_x, episode_stage = x, CURRICULUM_STAGES.index(x)
+        episode_x, episode_stage = x, curriculum_stages.index(x)
 
         # Initializations
         angle = 0.0
         A_star_path = Normal_A_star_search(np.array(pixel_grid), [int(v) for v in start_point], [int(v) for v in np.floor(end_point)])
-        A_star_points = np.asarray(A_star_path, dtype=float)
-        optimal_length = float(np.linalg.norm(np.diff(A_star_points, axis=0), axis=1).sum()) if len(A_star_points) > 1 else 0.0
+        A_star_points = np.asarray(A_star_path, dtype = float)
+        optimal_length = float(np.linalg.norm(np.diff(A_star_points, axis = 0), axis = 1).sum()) if len(A_star_points) > 1 else 0.0
         total_turn_delta = 0.0
         RegionsExplored = set()
         PixelVisits = np.zeros(np.asarray(pixel_grid).shape)    # how often each pixel has been entered this episode
@@ -106,13 +106,13 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             done = False
             distance_finish = float(np.linalg.norm(end_point - robot_pos))
             lidar_start = time.perf_counter()
-            State, max_ray_angle = network.GetState(robot_pos, VARNumberOfRayCasts, BSP, network.RayOffset, network.FOV, angle, VARRayDistance, maze_size, end_point)
+            State, max_ray_angle = network.GetState(robot_pos, VARNumberOfRayCasts, bsp, network.RayOffset, network.fov, angle, VARRayDistance, maze_size, end_point)
 
             if step == 0:
                 angle = max_ray_angle
                 rays_this_rollout += network.last_rays_cast
                 sensing_units += network.last_rays_cast * ray_range / 10.0
-                State, _ = network.GetState(robot_pos, VARNumberOfRayCasts, BSP, network.RayOffset, network.FOV, angle, VARRayDistance, maze_size, end_point)
+                State, _ = network.GetState(robot_pos, VARNumberOfRayCasts, bsp, network.RayOffset, network.fov, angle, VARRayDistance, maze_size, end_point)
                
             lidar_seconds_this_rollout += time.perf_counter() - lidar_start
             
@@ -165,7 +165,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             in_goal_pixel = bool(np.all(np.floor(new_pos / grid_distance) == np.floor(end_point / grid_distance)))
             goal_distance = 0.0 if in_goal_pixel else next_distance_finish
 
-            min_ray_px = min(State[:int(VARNumberOfRayCasts)]) ** 2 * RAY_SCALE
+            min_ray_px = min(State[:int(VARNumberOfRayCasts)]) ** 2 * ray_scale
 
             # Get reward
             Reward, done, maze_solved = network.reward(
@@ -175,9 +175,9 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             )
 
             # prevent stalling
-            if not done and len(robot_path) > STALL_WINDOW and \
-                    np.linalg.norm(new_pos - robot_path[-1 - STALL_WINDOW]) < STALL_MIN_DISPLACEMENT:
-                Reward -= STALL_END_PENALTY
+            if not done and len(robot_path) > stall_window and \
+                    np.linalg.norm(new_pos - robot_path[-1 - stall_window]) < stall_min_displacement:
+                Reward -= stall_end_penalty
                 done, stalled = True, True
 
             episode_reward += Reward
@@ -194,19 +194,19 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
         success_rate = past / (past + not_past) 
 
         # accuracy using A*
-        ACCURACY = network.GetRobotAccuracy(np.asarray(A_star_path), np.asarray(robot_path))
+        accuracy = network.GetRobotAccuracy(np.asarray(A_star_path), np.asarray(robot_path))
         path_efficiency = min(1.0, optimal_length / max(path_length, 1e-6)) if maze_solved else 0.0   # success-weighted shortest/actual path
         energy_per_length = network.EnergyUsed / max(path_length, 1e-6)
         Episode_Payload = [episode_count, episode_reward, episode_length, int(maze_solved), success_rate,
                            network.EnergyUsed, len(RegionsExplored), "completed" if done else "partial",
                            penalty_sum, path_length, total_turn_delta, lidar_seconds_this_rollout,
                            inference_seconds, rays_this_rollout, termination,
-                           maze_size, episode_x, episode_stage, optimal_length, path_efficiency, ACCURACY, energy_per_length,
+                           maze_size, episode_x, episode_stage, optimal_length, path_efficiency, accuracy, energy_per_length,
                            sensing_units, network.max_step, revisit_steps, time.perf_counter() - start_time, physics_energy]
 
         # Log data
         network.LogDataToCSV(Episode_Payload, None, None, "ep", agnt, directory, test)
-        #network.LogDataToCSV(pixel_grid, ACCURACY, None, "mze", agnt, directory, test)
+        #network.LogDataToCSV(pixel_grid, accuracy, None, "mze", agnt, directory, test)
         
         episode_count += 1
 

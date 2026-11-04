@@ -174,8 +174,8 @@ def get_new_training_example(training_steps, k=5.89, sd=20):
 
             return start_point, end_point, maze_size, grid_distance, walls, grid
 
-
         M = (grid, [start[0], start[1]], [end[0], end[1]])
+        
     else:
         M = generate_maze(grid_distance, maze_size)
 

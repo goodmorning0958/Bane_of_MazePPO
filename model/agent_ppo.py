@@ -4,7 +4,7 @@ import math
 import time
 import numpy as np
 import torch
-import torch.nn.functional as F
+import torch.nn.functional as functional
 import torch.distributions as dist
 from environment.training_example_generator import get_new_training_example
 from environment.A_star_search import Normal_A_star_search
@@ -16,33 +16,34 @@ from pathlib import Path
 
 from model.actor_critic import (
     ActorCritic,
-    ADAPT_TURN_WEIGHT,
-    DEAD_END_IS_TERMINAL,
-    ENERGY_REWARD_WEIGHT,
-    TURN_REWARD_WEIGHT,
-    TIME_REWARD_WEIGHT,
-    MAX_STEP_START,
-    MAX_STEP_END,
-    STEP_RAMP_SUCCESS,
-    REWARD_CLIP,
-    STEP_TIME_COST,
-    CLEARANCE_WEIGHT,
-    CLEARANCE_DISTANCE,
-    VISIT_PENALTY,
-    VISIT_CAP,
-    EXPLORE_BONUS,
-    STALL_STEP_SIZE,
-    STALL_STEP_PENALTY,
-    OVER_BUDGET_PENALTY,
-    RAY_SCALE,
-    LOG_STD_MIN,
-    HARD_ENERGY_LIMIT,
+    adapt_turn_weight,
+    dead_end_is_terminal,
+    energy_reward_weight,
+    turn_reward_weight,
+    time_reward_weight,
+    max_step_start,
+    max_step_end,
+    step_ramp_success,
+    reward_clip,
+    step_time_cost,
+    clearance_weight,
+    clearance_distance,
+    visit_penalty,
+    visit_cap,
+    explore_bonus,
+    stall_step_size,
+    stall_step_penalty,
+    over_budget_penalty,
+    ray_scale,
+    log_std_min,
+    hard_energy_limit,
 )
 from environment.maze_utils import _build_bsp_tree
 
+# Flags
 rollouts_default = 3000
 seed = 42
-min_rollout_steps = 256
+min_rollout_steps = 256 # must be positive
 ppo_epochs = 8
 minibatch_size = 64
 target_kl = 0.02
@@ -90,12 +91,13 @@ def _ppo_update(network, optimizer, ppo_parameters, states, actions, log_probs, 
     diagnostics = []
     stopped = False
 
+    # PPO Training loop
     for epoch in range(ppo_epochs):
         shuffled_indices = torch.randperm(len(states))
         for i in range(0, len(states), minibatch_size):
             with torch.no_grad():
                 mean_now, std_now, _ = network.forward(states)
-                kl = dist.kl_divergence(old_dist, dist.Normal(mean_now, std_now)).sum(-1).mean()
+                kl = dist.kl_divergence(old_dist, dist.Normal(mean_now, std_now)).sum(-1).mean() # Kl for policy change
 
             if not torch.isfinite(kl):
                 raise FloatingPointError("Non-finite policy KL.")
@@ -103,14 +105,16 @@ def _ppo_update(network, optimizer, ppo_parameters, states, actions, log_probs, 
                 stopped = True
                 break
 
+            # batched allows for better handling
             batch = shuffled_indices[i:i + minibatch_size]
             new_log_prob, entropy, batch_value = network.evaluate_actions(states[batch], actions[batch])
             probability_ratio = torch.exp(new_log_prob - log_probs[batch])
             surrogate_1 = probability_ratio * advantages[batch]
             surrogate_2 = torch.clamp(probability_ratio, 0.8, 1.2) * advantages[batch]
 
+            # Losses
             actor_loss = -torch.min(surrogate_1, surrogate_2).mean()
-            critic_loss = F.smooth_l1_loss(batch_value, returns[batch])
+            critic_loss = functional.smooth_l1_loss(batch_value, returns[batch])
             entropy_mean = entropy.mean()
             total_loss = actor_loss + 0.5 * critic_loss - entropy_coef * entropy_mean
 
@@ -123,7 +127,7 @@ def _ppo_update(network, optimizer, ppo_parameters, states, actions, log_probs, 
             optimizer.step()
 
             with torch.no_grad():
-                network.log_std.clamp_(LOG_STD_MIN, 1.0)
+                network.log_std.clamp_(log_std_min, 1.0)
                 clip_fraction = ((probability_ratio - 1.0).abs() > 0.2).float().mean()
 
             diagnostics.append([
@@ -135,7 +139,7 @@ def _ppo_update(network, optimizer, ppo_parameters, states, actions, log_probs, 
 
     with torch.no_grad():
         new_mean, new_std, new_values = network.forward(states)
-        final_kl = dist.kl_divergence(old_dist, dist.Normal(new_mean, new_std)).sum(-1).mean().item()
+        final_kl = dist.kl_divergence(old_dist, dist.Normal(new_mean, new_std)).sum(-1).mean().item() # KL controlls how much the policy can change
         variance = returns.var(unbiased = False)
         explained_variance = (1.0 - (returns - new_values).var(unbiased = False) / variance).item() if variance > 1e-8 else None
 
@@ -183,7 +187,8 @@ def _trim_csv(path, column, keep):
     with open(path, "w", newline = "", encoding = "utf-8") as f:
         csv.writer(f).writerows(rows)
 
-def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARWeightInitType, VARtargetMaxTurn, agnt, VARFOV, VARRayDistance, *, seed = seed, rollouts = None, output_dir = None):
+# main
+def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs, VARWeightInitType, VARtargetMaxTurn, agnt, varfov, VARRayDistance, *, seed = seed, rollouts = None, output_dir = None):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -206,39 +211,42 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
     history = []
     start_time = time.perf_counter()
 
-    network = ActorCritic(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, VARFOV, NNinputs)
+    # classes
+    network = ActorCritic(NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, VARtargetMaxTurn, varfov, NNinputs)
     network.InitializeWeights(VARWeightInitType)
     network.set_max_step(ramp_rate)
 
+    # config
     ppo_parameters = [p for name, p in network.named_parameters() if p.requires_grad and name != "log_w_turn"]
     optimizer = torch.optim.Adam(ppo_parameters, lr = learning_rate, eps = 1e-5)
-    w_optimizer = torch.optim.Adam([network.log_w_turn], lr = 1e-3) if ADAPT_TURN_WEIGHT else None
+    w_optimizer = torch.optim.Adam([network.log_w_turn], lr = 1e-3) if adapt_turn_weight else None
 
+    # added config for params
     config = dict(seed = seed, rollouts = rollouts, h1 = NNh1, h2 = NNh2, inputs = NNinputs,
-                  rays = VARNumberOfRayCasts, fov_radians = network.FOV, ray_distance = VARRayDistance,
+                  rays = VARNumberOfRayCasts, fov_radians = network.fov, ray_distance = VARRayDistance,
                   energy_budget = VARAllowedEnergy, energy_scale = VARAllowedEnergy / network.MaxSteps,
-                  energy_weight = ENERGY_REWARD_WEIGHT, turn_weight = TURN_REWARD_WEIGHT,
-                  time_weight = TIME_REWARD_WEIGHT, adaptive_turn = ADAPT_TURN_WEIGHT,
+                  energy_weight = energy_reward_weight, turn_weight = turn_reward_weight,
+                  time_weight = time_reward_weight, adaptive_turn = adapt_turn_weight,
                   target_max_turn = VARtargetMaxTurn, curriculum = curriculum_enabled,
                   initial_difficulty = x, k = network.k.item(), sd = network.sd.item(),
                   ray_offset = network.RayOffset.item(), weight_init = VARWeightInitType,
                   max_steps = network.MaxSteps, min_rollout_steps = min_rollout_steps,
-                  max_step_start = MAX_STEP_START, max_step_end = MAX_STEP_END, step_ramp_success = STEP_RAMP_SUCCESS,
+                  max_step_start = max_step_start, max_step_end = max_step_end, step_ramp_success = step_ramp_success,
                   min_rollout_steps_learning = min_rollout_steps_learning, curriculum_window = curriculum_window,
                   curriculum_promote = curriculum_promote, curriculum_demote = curriculum_demote,
                   curriculum_stages = curriculum_stages, stall_window = stall_window,
                   stall_min_displacement = stall_min_displacement, stall_end_penalty = stall_end_penalty,
-                  reward_clip = REWARD_CLIP, step_time_cost = STEP_TIME_COST, clearance_weight = CLEARANCE_WEIGHT,
-                  clearance_distance = CLEARANCE_DISTANCE, visit_penalty = VISIT_PENALTY, visit_cap = VISIT_CAP,
-                  explore_bonus = EXPLORE_BONUS, stall_step_size = STALL_STEP_SIZE, stall_step_penalty = STALL_STEP_PENALTY,
-                  over_budget_penalty = OVER_BUDGET_PENALTY,
-                  reward_scale = reward_scale, hard_energy_limit = HARD_ENERGY_LIMIT, log_std_min = LOG_STD_MIN, ray_scale = RAY_SCALE,
+                  reward_clip = reward_clip, step_time_cost = step_time_cost, clearance_weight = clearance_weight,
+                  clearance_distance = clearance_distance, visit_penalty = visit_penalty, visit_cap = visit_cap,
+                  explore_bonus = explore_bonus, stall_step_size = stall_step_size, stall_step_penalty = stall_step_penalty,
+                  over_budget_penalty = over_budget_penalty,
+                  reward_scale = reward_scale, hard_energy_limit = hard_energy_limit, log_std_min = log_std_min, ray_scale = ray_scale,
                   param_count = sum(p.numel() for p in network.parameters()),
                   actor_param_count = sum(p.numel() for m in (network.act1, network.act2, network.out) for p in m.parameters()),
                   actor_macs_per_inference = int(network.inputs * NNh1 + NNh1 * NNh2 + NNh2 * 2),
                   ppo_epochs = ppo_epochs, minibatch_size = minibatch_size, target_kl = target_kl,
                   learning_rate = learning_rate, entropy_coef = entropy_coef,
-                  dead_end_terminal = DEAD_END_IS_TERMINAL, torch_version = torch.__version__,
+                  dead_end_terminal = dead_end_is_terminal, torch_version = torch.__version__,
                   numpy_version = np.__version__, python_version = sys.version)
 
     config_path.write_text(json.dumps(config, indent = 2), encoding = "utf-8")
@@ -297,7 +305,9 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
     buffer_turn_total = 0.0
     buffer_episode_rewards, buffer_episode_steps = [], []
 
+    # loop
     for _rollout in range(episode_count, rollouts):
+        # get training example
         start_point, end_point, maze_size, grid_distance, walls, pixel_grid = get_new_training_example(x, network.k, network.sd)
         robot_pos = np.array(start_point, dtype = np.float32)
         end_point = np.array(end_point, dtype = np.float32)
@@ -306,6 +316,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
         end_point = end_point + 0.5
         episode_x, episode_stage = x, stage
 
+        # Initializations
         angle = 0.0
         A_star_path = Normal_A_star_search(np.array(pixel_grid), [int(v) for v in start_point], [int(v) for v in np.floor(end_point)])
         A_star_points = np.asarray(A_star_path, dtype = float)
@@ -313,7 +324,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
         total_turn_delta = 0.0
         episode_start = buffered_steps
         RegionsExplored = set()
-        PixelVisits = np.zeros(np.asarray(pixel_grid).shape)
+        PixelVisits = np.zeros(np.asarray(pixel_grid).shape) # how often each pixel has been entered this episode
         revisit_steps = 0
         sensing_units = 0.0
         ray_range = float(maze_size if VARRayDistance is None else VARRayDistance)
@@ -342,43 +353,48 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             done = False
             distance_finish = float(np.linalg.norm(end_point - robot_pos))
             lidar_start = time.perf_counter()
-            State, max_ray_angle = network.GetState(robot_pos, VARNumberOfRayCasts, bsp, network.RayOffset, network.FOV, angle, VARRayDistance, maze_size, end_point)
+            State, max_ray_angle = network.GetState(robot_pos, VARNumberOfRayCasts, bsp, network.RayOffset, network.fov, angle, VARRayDistance, maze_size, end_point)
 
             if step == 0:
                 angle = max_ray_angle
                 rays_this_rollout += network.last_rays_cast
                 sensing_units += network.last_rays_cast * ray_range / 10.0
-                State, _ = network.GetState(robot_pos, VARNumberOfRayCasts, bsp, network.RayOffset, network.FOV, angle, VARRayDistance, maze_size, end_point)
+                State, _ = network.GetState(robot_pos, VARNumberOfRayCasts, bsp, network.RayOffset, network.fov, angle, VARRayDistance, maze_size, end_point)
 
             lidar_seconds_this_rollout += time.perf_counter() - lidar_start
 
             rays_this_rollout += network.last_rays_cast
-            sensing_units += network.last_rays_cast * ray_range / 10.0
+            sensing_units += network.last_rays_cast * ray_range / 10.0    # rays x range, relative to a 10 px reference
 
+            # Get action
             inference_start = time.perf_counter()
             Action, log_prob, value, LatentAction, _ = network.get_action_and_value(State)
             inference_seconds += time.perf_counter() - inference_start
 
+            # params (old angle, angle, etc.)
             old_angle = float(angle)
             new_angle, step_size = old_angle + float(Action[0]), float(Action[1])
 
+            # added a way for early training for energy efficiency to
             turn_limit = math.pi - (math.pi - VARtargetMaxTurn) * min(1.0, ramp_rate / turn_limit_success)
             turn = (new_angle - old_angle + math.pi) % (2 * math.pi) - math.pi
-            turn_excess = max(0.0, abs(turn) - turn_limit)
+            turn_excess = max(0.0, abs(turn) - turn_limit) # how far past the limit the policy asked to turn
             turn = max(-turn_limit, min(turn_limit, turn))
             new_angle = (old_angle + turn + math.pi) % (2 * math.pi) - math.pi
             network.last_action = [turn / math.pi, step_size / network.max_step]
 
+            # Virtually update robot stats
             new_pos = (robot_pos + step_size * np.array([np.cos(new_angle), np.sin(new_angle)])).astype(np.float32)
             visit_pixel = tuple(int(np.clip(np.floor(new_pos[i]), 0, PixelVisits.shape[i] - 1)) for i in range(2))
-            current_pixel_visits = PixelVisits[visit_pixel]
+            current_pixel_visits = PixelVisits[visit_pixel] # times this pixel was entered before now
             PixelVisits[visit_pixel] += 1
             revisit_steps += int(current_pixel_visits > 0)
             robot_path.append(new_pos.copy())
             path_length += float(np.linalg.norm(new_pos - robot_pos))
             angle_diff_step = abs((new_angle - old_angle + math.pi) % (2 * math.pi) - math.pi)
-            total_turn_delta += angle_diff_step
+            total_turn_delta += angle_diff_step # turn sharpness
 
+            # Get state info
             run_into_wall = bool(RunIntoWall(robot_pos, walls, new_pos[0] - robot_pos[0], new_pos[1] - robot_pos[1]))
             in_dead_end, region_pos = network.InDeadEnd(grid_distance, new_pos, walls_np)
             region_tuple = tuple(region_pos.tolist())
@@ -394,14 +410,16 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             in_goal_pixel = bool(np.all(np.floor(new_pos / grid_distance) == np.floor(end_point / grid_distance)))
             goal_distance = 0.0 if in_goal_pixel else next_distance_finish
 
-            min_ray_px = min(State[:int(VARNumberOfRayCasts)]) ** 2 * RAY_SCALE
+            min_ray_px = min(State[:int(VARNumberOfRayCasts)]) ** 2 * ray_scale
 
+            # Get reward
             Reward, done, maze_solved = network.reward(
                 distance_progress, run_into_wall, in_dead_end, goal_distance,
                 region_unexplored, VARRayDistance, new_pos, step_size, energy_ramp_rate,
                 old_angle, new_angle, maze_size, done, min_ray_px, turn_excess, current_pixel_visits
             )
 
+            # prevent stalling
             if not done and len(robot_path) > stall_window and \
                     np.linalg.norm(new_pos - robot_path[-1 - stall_window]) < stall_min_displacement:
                 Reward -= stall_end_penalty
@@ -411,6 +429,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
             episode_length += 1
             penalty_sum += network.last_total_penalty
 
+            # store episode data
             network.store_transition(State, LatentAction, Reward * reward_scale, log_prob, done, value, buffered_steps)
             buffered_steps += 1
 
@@ -423,6 +442,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
         not_past += int(not maze_solved)
         success_rate = past / (past + not_past)
 
+        # Cirriculum
         recent_outcomes.append(int(maze_solved))
         rolling_success = sum(recent_outcomes) / len(recent_outcomes)
 
@@ -447,8 +467,9 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
                     recent_outcomes.clear()
                 x = curriculum_stages[stage]
 
+        # accuracy using A*
         accuracy = network.GetRobotAccuracy(np.asarray(A_star_path), np.asarray(robot_path))
-        path_efficiency = min(1.0, optimal_length / max(path_length, 1e-6)) if maze_solved else 0.0
+        path_efficiency = min(1.0, optimal_length / max(path_length, 1e-6)) if maze_solved else 0.0 # success-weighted shortest/actual path
         energy_per_length = network.EnergyUsed / max(path_length, 1e-6)
 
         history.append(dict(success = int(maze_solved), spl = path_efficiency, energy = float(network.EnergyUsed), accuracy = float(accuracy),
@@ -465,15 +486,17 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
                            maze_size, episode_x, episode_stage, optimal_length, path_efficiency, accuracy, energy_per_length,
                            sensing_units, network.max_step, revisit_steps, time.perf_counter() - start_time, rolling_success]
 
+        # Log data
         network.LogDataToCSV(Episode_Payload, None, None, "ep", agnt, directory, test)
 
         episode_count += 1
 
+        # Comput GAE and PPO / other opitimizations
         if done:
             next_value = torch.tensor(0.0, dtype = torch.float32)
         else:
             with torch.no_grad():
-                FinalState, _ = network.GetState(robot_pos, VARNumberOfRayCasts, bsp, network.RayOffset, network.FOV, angle, VARRayDistance, maze_size, end_point)
+                FinalState, _ = network.GetState(robot_pos, VARNumberOfRayCasts, bsp, network.RayOffset, network.fov, angle, VARRayDistance, maze_size, end_point)
                 _, _, next_value = network.forward(FinalState)
 
         episode_slice = slice(episode_start, buffered_steps)
@@ -486,6 +509,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
         if buffered_steps < rollout_target and _rollout != rollouts - 1:
             continue
 
+        # TRAINING PPO LOOP
         update_start = time.perf_counter()
         diagnostics, final_kl, kl_stopped, explained_variance = _ppo_update(
             network, optimizer, ppo_parameters, network.states[:buffered_steps], network.actions[:buffered_steps],
@@ -504,6 +528,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
 
         if w_optimizer is not None:
             avg_turn = buffer_turn_total / buffered_steps
+            # update weights
             w_turn_loss = -network.w_turn * (avg_turn - network.target_max_turn)
             w_optimizer.zero_grad()
             w_turn_loss.backward()
@@ -520,6 +545,7 @@ def StartAgent(test, NNh1, NNh2, VARNumberOfRayCasts, VARAllowedEnergy, NNinputs
         buffer_episode_rewards, buffer_episode_steps = [], []
         _write_summary(directory / f"Summary_{test}{agnt}.json", history, config, start_time)
 
+    # added a way to save the model's state
     torch.save({"model_state_dict": network.state_dict(), "config": config, "max_step": network.max_step}, directory / f"Policy_{agnt}.pt")
     network.output_directory = str(directory)
     _write_summary(directory / f"Summary_{test}{agnt}.json", history, config, start_time)
