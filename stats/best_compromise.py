@@ -1,4 +1,4 @@
-from stats_analytics import best_compromise
+from stats_analytics import best_compromise, pareto_front
 import pandas as pd
 import glob
 import os
@@ -25,6 +25,8 @@ weightss = {
     4: {'success': 0.3, 'path_efficiency': 0.1, 'energy': 0.1, 'rays': 0.5},
     5: {'success': 0, 'path_efficiency': 0, 'energy': 1, 'rays': 0},
 }
+
+print("pareto front results:\n")
 for i in range(6):
     weights = weightss[i]
     table = best_compromise(dataaa, weights)
@@ -32,3 +34,6 @@ for i in range(6):
     print(f"weights: {weights}\n")
     print(f"{table}\n\n")
 
+print("pareto front results:\n")
+patero_frontt = pareto_front(dataaa)
+print(patero_frontt)

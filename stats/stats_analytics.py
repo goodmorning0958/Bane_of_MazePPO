@@ -72,6 +72,39 @@ def best_compromise(data, weights):
 
     return agents.sort_values('score', ascending = False).head(5)
 
+def pareto_front(data, columns = ['success', 'energy']):
+
+    mask = data['success'] == 1
+
+    successful = data[mask]
+
+    agents = data.groupby('agent_id').agg(success = ('success', 'mean'))
+    agents['path_efficiency'] = successful.groupby('agent_id')['path_efficiency'].mean()
+    agents['accuracy'] = successful[np.isfinite(successful['accuracy'])].groupby('agent_id')['accuracy'].mean()
+    agents['energy'] = successful.groupby('agent_id')['physics_energy_J'].mean()
+    agents['rays'] = successful.groupby('agent_id')['rays_cast'].mean()
+
+    higher_is_better = ['success', 'path_efficiency']
+
+    front = []
+    for agnt, row in agents.iterrows():
+
+        boe = pd.Series(True, index = agents.index)
+        sb = pd.Series(False, index = agents.index)
+
+        for column in columns:
+            if column in higher_is_better:
+                boe &= agents[column] >= row[column]
+                sb |= agents[column] > row[column]
+            else:
+                boe &= agents[column] <= row[column]
+                sb |= agents[column] < row[column]
+
+        if not (boe & sb).any():
+            front.append(agnt)
+
+    return agents.loc[front, columns].sort_values('energy' if 'energy' in columns else columns[0])
+
 def extra_stats(result):
     variable_and_increments = {'VARNumberOfRayCasts': 8, 'VARFOV': 90, 'VARAllowedEnergy': 30, 'VARtargetMaxTurn': 0.5}
 
