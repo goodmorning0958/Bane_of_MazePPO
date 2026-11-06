@@ -48,6 +48,30 @@ def linear_regression(data, dtype):
 
     return result
 
+def best_compromise(data, weights):
+
+    mask = data['success'] == 1
+
+    successful = data[mask]
+
+    agents = data.groupby('agent_id').agg(success = ('success', 'mean'))
+    agents['path_efficiency'] = successful.groupby('agent_id')['path_efficiency'].mean()
+    agents['accuracy'] = successful[np.isfinite(successful['accuracy'])].groupby('agent_id')['accuracy'].mean()
+    agents['energy'] = successful.groupby('agent_id')['physics_energy_J'].mean()
+    agents['rays'] = successful.groupby('agent_id')['rays_cast'].mean()
+
+    scaled = pd.DataFrame(index = agents.index)
+
+    for column in ['success', 'path_efficiency']:
+        scaled[column] = (agents[column] - agents[column].min()) / (agents[column].max() - agents[column].min())
+
+    for column in ['accuracy', 'energy', 'rays']:
+        scaled[column] = (agents[column].max() - agents[column]) / (agents[column].max() - agents[column].min())
+
+    agents['score'] = sum(scaled[column] * weight for column, weight in weights.items())
+
+    return agents.sort_values('score', ascending = False).head(5)
+
 def extra_stats(result):
     variable_and_increments = {'VARNumberOfRayCasts': 8, 'VARFOV': 90, 'VARAllowedEnergy': 30, 'VARtargetMaxTurn': 0.5}
 
