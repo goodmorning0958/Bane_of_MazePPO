@@ -30,7 +30,7 @@ def logistic_regression(data):
     y = data['success']
 
     model = sm.Logit(y, X)
-    result = model.fit(disp=0)
+    result = model.fit(disp=0, cov_type='cluster', cov_kwds={'groups': data['agent_id']})
 
     return result
 
@@ -105,13 +105,20 @@ def pareto_front(data, columns = ['success', 'energy']):
 
     return agents.loc[front, columns].sort_values('energy' if 'energy' in columns else columns[0])
 
-def extra_stats(result):
-    variable_and_increments = {'VARNumberOfRayCasts': 8, 'VARFOV': 90, 'VARAllowedEnergy': 30, 'VARtargetMaxTurn': 0.5}
+def interactions_odds_ratios(result):
+    increments = {
+        'VARNumberOfRayCasts': 8,
+        'VARFOV': 90,
+        'VARAllowedEnergy': 30,
+        'VARtargetMaxTurn': 0.5
+    }
 
-    print("\nOdds Ratios:")
-    for variable, increment in variable_and_increments.items():
-        odds_ratio = np.exp(result.params[variable]*increment)
-        print(f"\n{variable}: {odds_ratio:.5f} (per {increment} increase in {variable})")
+    odds_ratios = {
+        variable: np.exp(result.params[variable] * increment)
+        for variable, increment in increments.items()
+    }
+
+    return odds_ratios
 
 def roc_auc(result, data):
     X = data[['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn']]
@@ -173,7 +180,7 @@ def interactions_logistic_regression(data):
     y = data['success']
 
     model = sm.Logit(y, X)
-    result = model.fit(disp=0)
+    result = model.fit(disp=0, cov_type='cluster', cov_kwds={'groups': data['agent_id']})
 
     return result
 
@@ -214,7 +221,7 @@ def bootstrap_odds_ratios(data, iterations = 1000, seed = 42):
 
         try:
             model = sm.Logit(y, X)
-            result = model.fit(disp=0)
+            result = model.fit(disp=0, cov_type='cluster', cov_kwds={'groups': bootstrap_samples['agent_id']})
 
             odds_ratios = {}
             for variable, increment in variable_and_increments.items():
@@ -238,3 +245,76 @@ def bootstrap_odds_ratios(data, iterations = 1000, seed = 42):
     upper_percentitle = np.percentile(bootstrap_ratios, 97.5, axis=0)
 
     return {variable: {'lower_percentitle': lower, 'upper_percentitle': upper} for variable, lower, upper in zip(variables, lower_percentitle, upper_percentitle)}
+
+def bootstrap_interactions_odds_ratios(data, iterations=1000, seed=42):
+
+    variables = ['VARNumberOfRayCasts', 'VARFOV', 'VARAllowedEnergy', 'VARtargetMaxTurn'
+    ]
+
+    increments = {'VARNumberOfRayCasts': 8, 'VARFOV': 90, 'VARAllowedEnergy': 30, 'VARtargetMaxTurn': 0.5}
+
+    means = data[variables].mean()
+
+    rng = np.random.default_rng(seed)
+
+    groups = {agent_id: group for agent_id, group in data.groupby('agent_id')}
+
+    agent_ids = list(groups)
+
+    bootstrap_ratios = []
+    successful_models = 0
+
+    for i in range(iterations):
+        sampled_agents = rng.choice(agent_ids, size=len(agent_ids), replace=True)
+
+        bootstrap_groups = []
+
+        for draw_id, agent_id in enumerate(sampled_agents):
+            group = groups[agent_id].copy()
+
+            group['_bootstrap_cluster'] = draw_id
+
+            bootstrap_groups.append(group)
+
+        bootstrap_samples = pd.concat(bootstrap_groups, ignore_index=True)
+
+        X = bootstrap_samples[variables].copy()
+        X = X - means
+
+        X['ray_count_fov'] = (X['VARNumberOfRayCasts'] * X['VARFOV'])
+        X['energy_constraint_turn_sharpness'] = (X['VARAllowedEnergy'] * X['VARtargetMaxTurn'])
+        X['ray_count_energy_constraint'] = (X['VARNumberOfRayCasts'] * X['VARAllowedEnergy'])
+        X['fov_turn_sharpness'] = (X['VARFOV'] * X['VARtargetMaxTurn'])
+        X['ray_count_turn_sharpness'] = (X['VARNumberOfRayCasts'] * X['VARtargetMaxTurn'])
+        X['fov_energy_constraint'] = (X['VARFOV'] * X['VARAllowedEnergy'])
+
+        X = sm.add_constant(X, has_constant='add')
+
+        y = bootstrap_samples['success']
+
+        try:
+            model = sm.Logit(y, X)
+
+            result = model.fit(disp=0, cov_type='cluster', cov_kwds={'groups': bootstrap_samples['_bootstrap_cluster']})
+
+            odds_ratios = {variable: np.exp(result.params[variable] * increment) for variable, increment in increments.items()}
+
+            bootstrap_ratios.append([odds_ratios[variable] for variable in variables])
+
+            successful_models += 1
+
+        except Exception:
+            continue
+
+    if successful_models == 0:
+        raise ValueError("No models succeeded")
+
+    print(f"Successful Models: {successful_models}/{iterations}")
+
+    bootstrap_ratios = np.asarray(bootstrap_ratios)
+
+    lower_percentile = np.percentile(bootstrap_ratios, 2.5, axis=0)
+
+    upper_percentile = np.percentile(bootstrap_ratios, 97.5, axis=0)
+
+    return {variable: {'lower_percentile': lower, 'upper_percentile': upper} for variable, lower, upper in zip(variables, lower_percentile, upper_percentile)}

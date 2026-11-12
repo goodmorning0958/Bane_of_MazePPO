@@ -1,5 +1,4 @@
-
-from stats_analytics import logistic_regression, interactions_logistic_regression, extra_stats, roc_auc, bootstrap_success_rate, roc_auc_for_interactions, bootstrap_odds_ratios, linear_regression
+from stats_analytics import logistic_regression, interactions_logistic_regression, roc_auc, bootstrap_success_rate, roc_auc_for_interactions, bootstrap_odds_ratios, linear_regression, interactions_odds_ratios, bootstrap_interactions_odds_ratios
 import glob
 import os
 import pandas as pd
@@ -37,7 +36,7 @@ print(result_linear.summary())
 print(result_linear_exploration.summary())
 
 roc_auc(result, data)
-extra_stats(result)
+#extra_stats(result)
 
 for variable, interval in odds_ratios_confidence_intervals.items():
     print(f"\n{variable} Bootstrap 95% Confidence Interval: ({interval['lower_percentitle']:.3f}, {interval['upper_percentitle']:.3f})")
@@ -53,3 +52,14 @@ print(interactions_result.summary())
 print("\nInteractions Logistic Regression AIC:", interactions_result.aic)
 
 roc_auc_for_interactions(interactions_result, data)
+
+interactions_odds_ratio = interactions_odds_ratios(interactions_result)
+
+print("\nInteractions Odds Ratios:")
+for variable, odds_ratio in interactions_odds_ratio.items():
+    print(f"\n{variable}: {odds_ratio:.3f}")
+
+bootstrap_interactions_ci = bootstrap_interactions_odds_ratios(data)
+
+for variable, interval in bootstrap_interactions_ci.items():
+    print(f"\n{variable} Bootstrap 95% Confidence Interval: ({interval['lower_percentile']:.5f}, {interval['upper_percentile']:.5f})")
